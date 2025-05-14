@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+
+djangoenv/
+
+db.sqlite3
+staticfiles/
+debug.log

@@ -1,0 +1,2 @@
+webhooks in utility of uploads for fetching realtime data (look at djangoQ)
+look at pandas for the dashboard page to start visualize some of the data 
