@@ -1,0 +1,45 @@
+.dropdown-item.active {
+    background-color: #4e73df;
+    color: white;
+}
+
+.dropdown-item.active:hover {
+    background-color: #2e59d9;
+    color: white;
+}
+
+/* Month selector styling */
+#monthSelector {
+    font-size: 0.875rem;
+    padding: 0.25rem 0.5rem;
+    height: auto;
+}
+
+/* View option active state */
+.dropdown-item.view-option.active {
+    background-color: #4e73df;
+    color: white;
+}
+
+.dropdown-item.view-option.active:hover {
+    background-color: #2e59d9;
+    color: white;
+}
+
+/* Header controls alignment */
+.card-header .d-flex {
+    gap: 0.5rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .card-header .d-flex {
+        flex-direction: column;
+        align-items: flex-start !important;
+    }
+    
+    #monthSelector {
+        width: 100% !important;
+        margin-bottom: 0.5rem;
+    }
+}

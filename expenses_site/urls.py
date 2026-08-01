@@ -23,7 +23,7 @@ urlpatterns = [
     path('upload/', include("expense_upload.urls")),
     path('dashboard/', include("dashboard.urls")),
     path('breakdown/', include("breakdown.urls")),
-    path('expenses_webhook/', include("webhooks.urls")),  # ✅ Keep this for Google Sheets
+    path('expenses_webhook/', include("webhooks.urls")),
     path('admin/', admin.site.urls),
 ]
 

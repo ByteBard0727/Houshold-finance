@@ -10838,8 +10838,9 @@ a:focus {
 
 .chart-bar {
   position: relative;
-  height: 10rem;
   width: 100%;
+  max-height: 80vh;     /* ✨ prevents infinite vertical growth */
+  overflow-y: auto;      /* ✨ scrolls internally if content too tall */
 }
 
 @media (min-width: 768px) {

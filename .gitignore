@@ -1,8 +1,17 @@
 __pycache__/
 *.py[cod]
+*/migrations/__pycache__/
 
 djangoenv/
-
-db.sqlite3
 staticfiles/
+
 debug.log
+db.sqlite3
+
+.env
+.gitignore
+
+secrets/
+todo.txt
+Private/
+media/

@@ -1,16 +1,14 @@
+#utils.py
 import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from expense_upload import models
 
-# Path to the service account JSON key file
-SERVICE_ACCOUNT_FILE = '/home/joey5055/Python-projects/household-finance/expenses_site/expense_upload/google_service_account.json'
+SERVICE_ACCOUNT_FILE = 'secrets/google_service_account.json'
 
-# Defines the required scopes
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
 # Authenticate and create a service object
-
 
 SPREADSHEET_ID = '1Jn04_Hc_XHs3MxAFoCYFlruLIparHOqL8Q_PHUiuZ68'
 RANGE_NAME = 'A1:O33'

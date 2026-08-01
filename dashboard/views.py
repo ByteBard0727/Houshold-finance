@@ -2,12 +2,11 @@ from django.shortcuts import render
 from expense_upload.models import Google_Sheets_Data
 from channels.layers import get_channel_layer
 import json
-from django.db.models import Sum
+from django.db.models import Sum, Max
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
 from datetime import datetime
 from .consumers import DashboardConsumer
-from django.db.models import Max
 
 # Global variable for caching dashboard data
 global_dashboard_data = {}
@@ -30,12 +29,8 @@ def get_pk_unique(sheet_name):
     month_num = get_month_number(sheet_name)
     return 32 * month_num if month_num else None
 
-def dynamic_year_expense():
-    nr_of_years = 0
-    range_of_pk = 3850
-
 def get_total_spend(sheet_name):
-    """Fetches the total spend for the given sheet from the record with the appropriate PK_Unique value."""
+    """Fetches the total spend for the given sheet from row 32 (the total row)."""
     pk_unique_value = get_pk_unique(sheet_name)
     total_entry = Google_Sheets_Data.objects.filter(
         Name_sheet=sheet_name, PK_Unique=pk_unique_value
@@ -44,32 +39,56 @@ def get_total_spend(sheet_name):
         raise ValueError(f"No total data found for sheet {sheet_name}")
     return total_entry["Total_amount"]
 
+def get_total_spend_bulk(sheet_names):
+    """Get total spend for multiple sheets in ONE query - optimized version."""
+    if not sheet_names:
+        return {}
+    
+    pk_values = [get_pk_unique(sheet) for sheet in sheet_names if get_pk_unique(sheet)]
+    
+    # Single query to fetch all total rows at once
+    totals = Google_Sheets_Data.objects.filter(
+        Name_sheet__in=sheet_names,
+        PK_Unique__in=pk_values
+    ).values('Name_sheet', 'Total_amount', 'PK_Unique')
+    
+    # Create a dictionary mapping sheet_name to total_amount
+    totals_dict = {entry['Name_sheet']: entry['Total_amount'] or 0 for entry in totals}
+    
+    return totals_dict
+
 def _get_monthly_expenses(sheet_name):
     """
     Internal helper function.
-    Fetch the total spend for the month from the record with the correct PK_Unique 
-    (32 for Jan2024, 64 for Feb2024, etc.) and compute category percentages.
+    Fetch the total spend for the month from row 32 and compute category percentages.
     """
     try:
-        total_spend = get_total_spend(sheet_name)  # Get the total spending for the month
-        category_totals = get_category_totals(sheet_name)  # Get the category totals for the month
-        percentages = calculate_category_percentages(total_spend, category_totals)  # Calculate category percentages
+        total_spend = get_total_spend(sheet_name)
+        category_totals = get_category_totals(sheet_name)
+        percentages = calculate_category_percentages(total_spend, category_totals)
         return percentages
     except Exception as e:
         raise ValueError(f"Error in calculating monthly expenses: {e}")
 
-
 def get_category_totals(sheet_name):
-    """Aggregates the totals for each expense category (up to and including the total row) for the given sheet."""
+    """Aggregates the totals for each expense category in a SINGLE query - optimized."""
     pk_unique_value = get_pk_unique(sheet_name)
-    categories = ["Food", "Leisure", "Utility", "Automatic_withdrawal", "SMBC_payments", "Stuff"]
-    totals = {}
-    for category in categories:
-        agg_result = Google_Sheets_Data.objects.filter(
-            Name_sheet=sheet_name, PK_Unique__lte=pk_unique_value
-        ).aggregate(total=Sum(category))
-        totals[category] = agg_result["total"] or 0
-    return totals
+    
+    # Single database query that aggregates all categories at once
+    result = Google_Sheets_Data.objects.filter(
+        Name_sheet=sheet_name, 
+        PK_Unique__lt=pk_unique_value  # Rows 1-31, excluding the total row
+    ).aggregate(
+        Food=Sum('Food'),
+        Leisure=Sum('Leisure'),
+        Utility=Sum('Utility'),
+        Automatic_withdrawal=Sum('Automatic_withdrawal'),
+        SMBC_payments=Sum('SMBC_payments'),
+        Stuff=Sum('Stuff')
+    )
+    
+    # Convert None to 0
+    return {key: value or 0 for key, value in result.items()}
 
 def calculate_category_percentages(total_spend, category_totals):
     """Given the total spend and a dictionary of category totals, calculates the percentage for each category."""
@@ -79,35 +98,27 @@ def calculate_category_percentages(total_spend, category_totals):
     }
 
 def get_last_12_sheets():
-    """Fetch the last 12 available sheets using PK_Unique (32 rows per sheet), even across year boundaries."""
-    # Get the maximum PK_Unique value (most recent month)
-    max_pk_unique = Google_Sheets_Data.objects.aggregate(Max('PK_Unique'))['PK_Unique__max']
+    """Fetch the last 12 available sheets efficiently."""
+    # Get distinct sheet names ordered by the sheet name itself
+    sheet_names = list(
+        Google_Sheets_Data.objects
+        .values_list('Name_sheet', flat=True)
+        .distinct()
+        .order_by('-Name_sheet')
+    )
     
-    # Calculate the starting PK_Unique for the last 12 sheets
-    sheet_range = []
-    for i in range(12):
-        # Calculate the PK_Unique for each sheet, which is decremented by 32 for each previous month
-        sheet_range.append(max_pk_unique - (i * 32))
-    
-    # Query the sheets corresponding to the calculated PK_Unique values
-    sheets = Google_Sheets_Data.objects.filter(PK_Unique__in=sheet_range).values('Name_sheet', 'PK_Unique').distinct()
-    
-    # Sort the sheets by PK_Unique in descending order (most recent sheet first)
-    sheet_names = [sheet['Name_sheet'] for sheet in sorted(sheets, key=lambda x: x['PK_Unique'])]
-    
-    print("Last 12 Sheets:", sheet_names)  # Debugging: Check the sheets fetched
+    print("Last 12 Sheets:", sheet_names)
     return sheet_names
 
 def send_websocket_update():
     """Sends a message to WebSocket with updated data."""
     channel_layer = get_channel_layer()
-    # Fetch average monthly expenses
     average_monthly_expenses_value = get_average_monthly_expenses()
-    # Send the updated data to the WebSocket
+    
     async_to_sync(channel_layer.group_send)(
-        "dashboard_group",  # You should ensure the group name is the same across WebSocket consumers
+        "dashboard_group",
         {
-            "type": "send_dashboard_data",  # You will need to handle this in your WebSocket consumer
+            "type": "send_dashboard_data",
             "average_monthly_expenses": average_monthly_expenses_value,
         }
     )
@@ -117,44 +128,52 @@ def send_websocket_update():
 #####################
 
 def dashboard(request):
-    """Render the main dashboard page and send data over WebSocket."""
+    """Render the main dashboard page."""
     average_monthly_expenses_value = get_average_monthly_expenses()
-    get_total_year_exp = get_year_total_expense()
-    # Trigger the WebSocket update with the latest data
-    send_websocket_update()
+    
     return render(request, 'index.html', {
         'average_monthly_expenses': average_monthly_expenses_value
     })
 
 def get_average_monthly_expenses():
-    """Calculate average monthly expenses based on the last 12 sheets in the database."""
+    """Calculate average monthly expenses based on the last 12 sheets - optimized."""
     sheet_names = get_last_12_sheets()
-    total_expenses = 0
-    sheet_count = len(sheet_names)
     
-
-    for sheet_name in sheet_names:
-        total_spend = get_total_spend(sheet_name)
-        total_expenses += total_spend
-    avg_month_exp = total_expenses / sheet_count if sheet_count > 0 else 0
+    if not sheet_names:
+        return (0, 0)
+    
+    # Get all totals in ONE query
+    totals_dict = get_total_spend_bulk(sheet_names)
+    
+    total_expenses = sum(totals_dict.values())
+    avg_month_exp = total_expenses / len(sheet_names) if sheet_names else 0
+    
     print("running get_average_monthly_expenses function")
-    return (round(avg_month_exp, 2),(total_spend))
+    return (round(avg_month_exp, 2), total_expenses)
 
 def get_year_total_expense():
+    """Get total expenses for the last 12 months - optimized."""
     sheet_names = get_last_12_sheets()
-    total_expenses = 0
-
-    for sheet_name in sheet_names:
-        total_spend = get_total_spend(sheet_name)
-        total_expenses += total_spend
+    
+    if not sheet_names:
+        return 0
+    
+    # Get all totals in ONE query
+    totals_dict = get_total_spend_bulk(sheet_names)
+    total_expenses = sum(totals_dict.values())
+    
     print("running the total year expense")
     return total_expenses
 
-
-# Example logging inside the function
 def update_dashboard_data(request=None):
+    """Fetch data for the line chart showing monthly trends - optimized."""
     sheet_names = get_last_12_sheets()
-    total_costs = [get_total_spend(sheet_name) for sheet_name in sheet_names]
+    
+    # Get all totals in ONE query instead of 12 separate queries
+    totals_dict = get_total_spend_bulk(sheet_names)
+    
+    # Maintain order and convert to list
+    total_costs = [totals_dict.get(sheet, 0) for sheet in sheet_names]
 
     dashboard_data = {
         "data": [
@@ -175,16 +194,32 @@ def update_dashboard_data(request=None):
     )
 
     if request:
-        return JsonResponse({"status": "success", "message": "Data sent to WebSocket"})
+        return JsonResponse(dashboard_data)
     return None
 
-
 def get_sheets(request):
-    """Fetch available sheets (months/years) dynamically."""
-    expenses = Google_Sheets_Data.objects.values_list("Date", flat=True)
-    sheet_names = list(set(Date.strftime("%b%Y") for Date in expenses if Date))
-    sheet_names.sort(key=lambda x: datetime.strptime(x, "%b%Y"), reverse=True)
-    formatted_sheets = [{"name": sheet, "value": sheet} for sheet in sheet_names[:12]]
+    """Fetch available sheets (months/years) dynamically in chronological order."""
+    # Get distinct sheet names
+    sheet_names = list(
+        Google_Sheets_Data.objects
+        .values_list('Name_sheet', flat=True)
+        .distinct()
+    )
+    
+    # Helper function to convert sheet name to sortable date
+    def sheet_to_date(sheet_name):
+        try:
+            # Parse "Jan2024" format to datetime
+            return datetime.strptime(sheet_name, "%b%Y")
+        except ValueError:
+            return datetime.min  # Put invalid formats at the beginning
+    
+    # Sort by date (most recent first)
+    sheet_names.sort(key=sheet_to_date, reverse=True)
+    
+    # Limit to 12 most recent
+    formatted_sheets = [{"name": sheet, "value": sheet} for sheet in sheet_names]
+    
     return JsonResponse({"sheets": formatted_sheets})
 
 def get_monthly_expenses(request):
@@ -198,15 +233,24 @@ def get_monthly_expenses(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 def get_sheet_data(request):
-    """Fetch detailed categorized expenses for the selected sheet and merge with the monthly breakdown."""
+    """Fetch detailed categorized expenses for the selected sheet."""
     sheet_name = request.GET.get("sheet_name")
     if not sheet_name or sheet_name.strip() == "":
         return JsonResponse({"error": "No sheet name provided"}, status=400)
 
-    query_results = Google_Sheets_Data.objects.filter(Name_sheet=sheet_name).values(
-        "Date", "Food", "Leisure", "Utility", "Automatic_withdrawal", "SMBC_payments", "Stuff"
-    )
+    # Get daily data (rows 1-31, excluding the total row)
+    pk_unique_value = get_pk_unique(sheet_name)
+    
+    query_results = Google_Sheets_Data.objects.filter(
+        Name_sheet=sheet_name,
+        PK_Unique__lt=pk_unique_value
+    ).values(
+        "Date", "Food", "Leisure", "Utility", 
+        "Automatic_withdrawal", "SMBC_payments", "Stuff"
+    ).order_by('PK_Unique')
+    
     data_list = list(query_results)
     if not data_list:
         return JsonResponse({"error": "No data found for selected sheet"}, status=404)
@@ -251,3 +295,209 @@ def safe_float(value):
         return float(value) if value is not None else 0
     except (ValueError, TypeError):
         return 0
+
+#####################
+# Chart View Options#
+#####################
+
+def get_daily_expenses(request):
+    """Get daily expenses for the selected month."""
+    sheet_name = request.GET.get("sheet_name")
+    
+    if not sheet_name:
+        # Default to latest sheet
+        sheets = get_last_12_sheets()
+        sheet_name = sheets[0] if sheets else None
+    
+    if not sheet_name:
+        return JsonResponse({"error": "No sheet available"}, status=404)
+    
+    # Get daily data (rows 1-31, excluding total row 32)
+    pk_unique_value = get_pk_unique(sheet_name)
+    
+    daily_data = Google_Sheets_Data.objects.filter(
+        Name_sheet=sheet_name,
+        PK_Unique__lt=pk_unique_value
+    ).values('Date', 'Food', 'Leisure', 'Utility', 
+             'Automatic_withdrawal', 'SMBC_payments', 'Stuff').order_by('PK_Unique')
+    
+    dates = []
+    amounts = []
+    
+    for entry in daily_data:
+        if entry['Date']:
+            # Calculate daily total from all categories
+            daily_total = sum([
+                float(entry.get('Food') or 0),
+                float(entry.get('Leisure') or 0),
+                float(entry.get('Utility') or 0),
+                float(entry.get('Automatic_withdrawal') or 0),
+                float(entry.get('SMBC_payments') or 0),
+                float(entry.get('Stuff') or 0)
+            ])
+            
+            if daily_total > 0:  # Only include days with expenses
+                date_obj = entry['Date'] if isinstance(entry['Date'], datetime) else datetime.strptime(str(entry['Date']), '%Y-%m-%d')
+                dates.append(date_obj.strftime('%m/%d'))
+                amounts.append(daily_total)
+    
+    return JsonResponse({
+        "labels": dates,
+        "values": amounts,
+        "view_type": "daily"
+    })
+
+def get_weekly_expenses(request):
+    """Get weekly aggregated expenses for the selected month."""
+    sheet_name = request.GET.get("sheet_name")
+    
+    if not sheet_name:
+        sheets = get_last_12_sheets()
+        sheet_name = sheets[0] if sheets else None
+    
+    if not sheet_name:
+        return JsonResponse({"error": "No sheet available"}, status=404)
+    
+    pk_unique_value = get_pk_unique(sheet_name)
+    
+    # Get daily data
+    daily_data = list(Google_Sheets_Data.objects.filter(
+        Name_sheet=sheet_name,
+        PK_Unique__lt=pk_unique_value
+    ).values('Date', 'Food', 'Leisure', 'Utility', 
+             'Automatic_withdrawal', 'SMBC_payments', 'Stuff').order_by('PK_Unique'))
+    
+    # Group by weeks (1-7 = Week 1, 8-14 = Week 2, etc.)
+    weeks = {1: 0, 2: 0, 3: 0, 4: 0}  # Initialize 4 weeks
+    
+    for entry in daily_data:
+        if entry['Date']:
+            date_obj = entry['Date'] if isinstance(entry['Date'], datetime) else datetime.strptime(str(entry['Date']), '%Y-%m-%d')
+            day = date_obj.day
+            
+            # Calculate week number (1-4 only)
+            if day <= 7:
+                week_num = 1
+            elif day <= 14:
+                week_num = 2
+            elif day <= 21:
+                week_num = 3
+            else:
+                week_num = 4  # Days 22-31 all go to week 4
+            
+            # Sum all categories for this day
+            daily_total = sum([
+                float(entry.get('Food') or 0),
+                float(entry.get('Leisure') or 0),
+                float(entry.get('Utility') or 0),
+                float(entry.get('Automatic_withdrawal') or 0),
+                float(entry.get('SMBC_payments') or 0),
+                float(entry.get('Stuff') or 0)
+            ])
+            weeks[week_num] += daily_total
+    
+    labels = [f"Week {w}" for w in sorted(weeks.keys())]
+    values = [weeks[w] for w in sorted(weeks.keys())]
+    
+    return JsonResponse({
+        "labels": labels,
+        "values": values,
+        "view_type": "weekly",
+        "sheet_name": sheet_name
+    })
+
+
+def get_monthly_overview(request):
+    # 1️⃣ Get distinct sheet names
+    sheet_names = list(
+        Google_Sheets_Data.objects
+        .values_list('Name_sheet', flat=True)
+        .distinct()
+    )
+
+    # 2️⃣ Convert to real dates for sorting
+    def sheet_to_date(sheet_name):
+        try:
+            return datetime.strptime(sheet_name, "%b%Y")
+        except ValueError:
+            return datetime.min
+
+    # Sort oldest → newest (Jan2024 → Jan2025)
+    sheet_names.sort(key=sheet_to_date)
+
+    # 3️⃣ Get totals in ONE optimized query
+    totals_dict = get_total_spend_bulk(sheet_names)
+
+    # 4️⃣ Maintain correct order
+    labels = sheet_names
+    values = [totals_dict.get(sheet, 0) for sheet in sheet_names]
+
+    return JsonResponse({
+        "labels": labels,
+        "values": values
+    })
+
+
+
+def get_month_stats(request):
+    """Get statistics for a specific month."""
+    sheet_name = request.GET.get("sheet_name")
+    
+    if not sheet_name:
+        sheets = get_last_12_sheets()
+        sheet_name = sheets[0] if sheets else None
+    
+    if not sheet_name:
+        return JsonResponse({"error": "No sheet available"}, status=404)
+    
+    try:
+        # Get total spend for the month
+        total_spend = get_total_spend(sheet_name)
+        
+        # Budget per month (200,000 yen)
+        monthly_budget = 200000
+        
+        # Calculate budget usage percentage
+        budget_percentage = (total_spend / monthly_budget) * 100 if monthly_budget > 0 else 0
+        
+        # Calculate average daily spending
+        pk_unique_value = get_pk_unique(sheet_name)
+        
+        # Get daily data to calculate average
+        daily_data = Google_Sheets_Data.objects.filter(
+            Name_sheet=sheet_name,
+            PK_Unique__lt=pk_unique_value
+        ).values('Date', 'Food', 'Leisure', 'Utility', 
+                 'Automatic_withdrawal', 'SMBC_payments', 'Stuff')
+        
+        # Count days with expenses and calculate total
+        days_with_expenses = 0
+        daily_totals = []
+        
+        for entry in daily_data:
+            if entry['Date']:
+                daily_total = sum([
+                    float(entry.get('Food') or 0),
+                    float(entry.get('Leisure') or 0),
+                    float(entry.get('Utility') or 0),
+                    float(entry.get('Automatic_withdrawal') or 0),
+                    float(entry.get('SMBC_payments') or 0),
+                    float(entry.get('Stuff') or 0)
+                ])
+                if daily_total > 0:
+                    daily_totals.append(daily_total)
+                    days_with_expenses += 1
+        
+        # Calculate average daily spending
+        avg_daily_spending = sum(daily_totals) / days_with_expenses if days_with_expenses > 0 else 0
+        
+        return JsonResponse({
+            "sheet_name": sheet_name,
+            "total_spend": total_spend,
+            "budget_percentage": round(budget_percentage, 1),
+            "monthly_budget": monthly_budget,
+            "avg_daily_spending": round(avg_daily_spending, 2),
+            "days_with_expenses": days_with_expenses
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

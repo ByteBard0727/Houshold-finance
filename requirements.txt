@@ -1,0 +1,39 @@
+# Django and ASGI
+Django==4.2.17
+asgiref==3.8.1
+daphne==4.1.2
+channels==4.2.0
+channels-redis==4.2.1
+redis==6.1.0
+
+# PostgreSQL driver for Supabase
+psycopg2-binary==2.9.10
+
+# Data processing
+pandas==2.2.3
+numpy==2.2.1
+django-pandas==0.6.7
+python-dateutil==2.9.0.post0
+pytz==2024.2
+tzdata==2024.2
+
+# Google Sheets API
+google-api-core==2.24.0
+google-api-python-client==2.157.0
+google-auth==2.37.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1
+gspread==6.1.4
+
+# Frontend / forms
+django-bootstrap-v5==1.0.11
+crispy-bootstrap5==2024.10
+django-crispy-forms==2.3
+django-cors-headers==4.6.0
+
+# HTTP requests & environment management
+requests==2.32.3
+python-decouple==3.8
+Pillow==11.1.0
+
+whitenoise==6.7.0
