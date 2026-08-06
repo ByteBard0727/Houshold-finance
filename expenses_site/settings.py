@@ -3,6 +3,7 @@ Django settings for expenses_site project.
 """
 
 import decouple # type: ignore
+from decouple import config
 import os
 from pathlib import Path
 
@@ -10,13 +11,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING
 SECRET_KEY = decouple.config("DJANGO_SECRET_KEY")
-DEBUG = True
+DEBUG = decouple.config("DEBUG")
+SUPABASE_DB_PASSWORD = decouple.config("SUPABASE_DB_PASSWORD")
+SUPABASE_LINK = decouple.config("SUPABASE_LINK")
+REDIS_HOST = decouple.config("REDIS_HOST")
+DJANGO_SECRET_KEY = decouple.config("DJANGO_SECRET_KEY")
+ALLOWED_HOSTS = decouple.config("DJANGO_ALLOWED_HOSTS").split(",")
 
-ALLOWED_HOSTS = [
-    ".ngrok-free.app",
-    "127.0.0.1",
-    "localhost",
-]
 
 # Application definition
 INSTALLED_APPS = [
@@ -84,7 +85,7 @@ WSGI_APPLICATION = "expenses_site.wsgi.application"
 ASGI_APPLICATION = "expenses_site.asgi.application"
 
 # Channels / Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_HOST = decouple.config("REDIS_HOST", "localhost")
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -137,6 +138,24 @@ STATIC_ROOT = BASE_DIR / "staticfiles"  # ~/expenses_site/staticfiles
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 RECEIPT_MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+
+# Gemini receipt extraction. The API key is optional at startup so an upload can
+# still be retained and marked failed before credentials are configured.
+GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
+GEMINI_RECEIPT_MODEL = config("GEMINI_RECEIPT_MODEL", default="gemini-2.5-flash-lite")
+GEMINI_RECEIPT_TIMEOUT = config("GEMINI_RECEIPT_TIMEOUT", default=20, cast=float)
+
+# Authenticated receipt writes to the bound Google Apps Script web app.
+APPS_SCRIPT_RECEIPT_URL = config("APPS_SCRIPT_RECEIPT_URL", default="")
+APPS_SCRIPT_RECEIPT_SHARED_SECRET = config(
+    "APPS_SCRIPT_RECEIPT_SHARED_SECRET",
+    default="",
+)
+APPS_SCRIPT_RECEIPT_TIMEOUT = config(
+    "APPS_SCRIPT_RECEIPT_TIMEOUT",
+    default=20,
+    cast=float,
+)
 
 # WhiteNoise storage (for production + gzip + hashed files)
 # Development-friendly storage (copy everything, ignore missing references)

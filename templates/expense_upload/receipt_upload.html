@@ -35,12 +35,29 @@
             padding: 0.75rem 1rem;
             width: 100%;
         }
+        .button-link {
+            background: #1769aa;
+            border-radius: 0.5rem;
+            color: white;
+            display: block;
+            margin-top: 1rem;
+            padding: 0.85rem 1rem;
+            text-align: center;
+            text-decoration: none;
+        }
         .success {
             background: #e8f5e9;
             border-radius: 0.5rem;
             margin-bottom: 1rem;
             padding: 1rem;
             overflow-wrap: anywhere;
+        }
+        .failure {
+            background: #fff3e0;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            overflow-wrap: anywhere;
+            padding: 1rem;
         }
         .errorlist { color: #b00020; padding-left: 1.25rem; }
         .helptext { color: #5f6872; font-size: 0.9rem; }
@@ -51,9 +68,20 @@
     <section class="card">
         <h1>Upload a receipt</h1>
         {% if receipt %}
-            <div class="success" role="status">
+            <div class="{% if receipt.status == 'extracted' %}success{% else %}failure{% endif %}" role="status">
                 Receipt stored successfully.<br>
                 Reference: {{ receipt.id }}
+                {% if receipt.status == 'extracted' %}
+                    <hr>
+                    <strong>{{ receipt.extracted_json.store_name|default:"Store not identified" }}</strong><br>
+                    {{ receipt.extracted_json.receipt_date }} · ¥{{ receipt.extracted_json.total_amount }}<br>
+                    Category: {{ receipt.extracted_json.category }}<br>
+                    <a class="button-link" href="{% url 'confirm_receipt' receipt.id %}">Review and confirm</a>
+                {% else %}
+                    <hr>
+                    Automatic extraction failed: {{ receipt.error_message }}<br>
+                    Your image is still stored. You can retry after Gemini is configured or available.
+                {% endif %}
             </div>
         {% endif %}
         <form method="post" enctype="multipart/form-data">
