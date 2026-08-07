@@ -21,7 +21,7 @@ class ReceiptUploadForm(forms.Form):
         help_text="Select one or more JPEG or PNG receipts.",
         widget=MultipleFileInput(
             attrs={
-                "accept": "image/jpeg,image/png",
+                "accept": ".jpg,.jpeg,.png,image/jpeg,image/png",
                 "multiple": True,
             }
         ),
@@ -38,8 +38,12 @@ class ReceiptUploadForm(forms.Form):
                     f"Each image must be no larger than {max_megabytes} MB."
                 )
 
-            if image.image.format not in {"JPEG", "PNG"}:
-                raise forms.ValidationError("Upload only JPEG or PNG receipt images.")
+            detected_format = (image.image.format or "unknown").upper()
+            if detected_format not in {"JPEG", "MPO", "PNG"}:
+                raise forms.ValidationError(
+                    "Upload only JPEG or PNG receipt images. "
+                    f"Detected format: {detected_format}."
+                )
 
         return images
 

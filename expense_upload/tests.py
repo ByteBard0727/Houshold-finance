@@ -2,11 +2,13 @@ import base64
 import tempfile
 from unittest.mock import Mock, patch
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 
+from .forms import ReceiptUploadForm
 from .models import Receipt
 from .services.extraction import (
     ReceiptExtractionError,
@@ -25,6 +27,24 @@ PNG_IMAGE = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB"
     "AScY42YAAAAASUVORK5CYII="
 )
+
+
+@override_settings(RECEIPT_MAX_UPLOAD_SIZE=10 * 1024 * 1024)
+class ReceiptUploadFormTests(SimpleTestCase):
+    def test_mpo_encoded_jpeg_is_accepted(self):
+        image = Mock(size=1024, image=Mock(format="MPO"))
+        form = ReceiptUploadForm()
+        form.cleaned_data = {"images": [image]}
+
+        self.assertEqual(form.clean_images(), [image])
+
+    def test_rejection_reports_detected_image_format(self):
+        image = Mock(size=1024, image=Mock(format="WEBP"))
+        form = ReceiptUploadForm()
+        form.cleaned_data = {"images": [image]}
+
+        with self.assertRaisesMessage(ValidationError, "Detected format: WEBP"):
+            form.clean_images()
 
 
 class ReceiptUploadTests(TestCase):
