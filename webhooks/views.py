@@ -1,3 +1,5 @@
+import hmac
+from django.conf import settings
 from django.http import JsonResponse
 from expenses_site.utils import fetch_google_sheet_data, RANGE_NAME, SPREADSHEET_ID, clean_value
 from expense_upload.models import Google_Sheets_Data
@@ -33,57 +35,79 @@ def parse_date(date_value):
     return None  # If none match give none
 
 # Webhook view that processes the incoming POST request from the google sheets
-@transaction.atomic
 @csrf_exempt
 def google_sheet_webhook(request):
     if request.method == "POST":
-        spreadsheet_id = "1Jn04_Hc_XHs3MxAFoCYFlruLIparHOqL8Q_PHUiuZ68"
-        
-        # Grab sheets from the spreadsheet after the post request comes in
-        all_sheets_data = fetch_google_sheet_data(spreadsheet_id)
+        configured_secret = settings.EXPENSES_WEBHOOK_SHARED_SECRET
+        provided_secret = request.headers.get("X-Webhook-Secret", "")
 
-        print("Received webhook data. Processing sheets...")
+        if not configured_secret:
+            return JsonResponse(
+                {"error": "Webhook authentication is not configured"},
+                status=503,
+            )
 
-        # Loop the sheets and the celldata
-        for sheet_name, sheet_rows in all_sheets_data.items():
-            print(f"Processing sheet: {sheet_name}")
-            for row in sheet_rows:
-                parsed_date = parse_date(row['Date'])
-                date_str = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
+        if not hmac.compare_digest(provided_secret, configured_secret):
+            return JsonResponse({"error": "Unauthorized"}, status=401)
 
-                # Update existing rows and cells of data or create if none-existing
-                Google_Sheets_Data.objects.update_or_create(
-                    PK_Unique=row.get('PK_Unique'),  # Use PK_Unique as the lookup field also for later
-                    defaults={
-                        'UserID': clean_value(row.get('UserID')),
-                        'Username': clean_value(row.get('Username')),
-                        'Date': clean_value(date_str),
-                        'Food': clean_value(row.get('Food')),
-                        'Stuff': clean_value(row.get('Stuff')),
-                        'Leisure': clean_value(row.get('Leisure')),
-                        'Automatic_withdrawal': clean_value(row.get('Automatic_withdrawal')),
-                        'Automatic_withdrawal_com': clean_value(row.get('Automatic_withdrawal_com')),
-                        'SMBC_payments': clean_value(row.get('SMBC_payments')),
-                        'SMBC_card_comments': clean_value(row.get('SMBC_card_comments')),
-                        'Utility': clean_value(row.get('Utility')),
-                        'Details_utility': clean_value(row.get('Details_utility')),
-                        'Total_amount': clean_value(row.get('Total_amount')),
-                        'Name_sheet': sheet_name,
-                    }
-                )
-                print(f"Processed row: {row['PK_Unique']}")
-        
-        print("Webhook processed successfully.")
+        if request.content_type != "application/json":
+            return JsonResponse(
+                {"error": "Content-Type must be application/json"},
+                status=415,
+            )
 
-        # Call the update dashboard data so it can be send to the front-end
-        update_dashboard_data()
-
-        # Show all processed sheets and rows
-        return JsonResponse({
-            "status": "success",
-            "message": "Data saved to the database.",
-            "rows_processed": sum(len(rows) for rows in all_sheets_data.values()),
-            "sheets_processed": list(all_sheets_data.keys()),
-        })
+        return _synchronize_google_sheets()
 
     return JsonResponse({"error": "Invalid request method"}, status=400)
+
+
+@transaction.atomic
+def _synchronize_google_sheets():
+    spreadsheet_id = "1Jn04_Hc_XHs3MxAFoCYFlruLIparHOqL8Q_PHUiuZ68"
+
+    # Grab sheets from the spreadsheet after the post request comes in
+    all_sheets_data = fetch_google_sheet_data(spreadsheet_id)
+
+    print("Received webhook data. Processing sheets...")
+
+    # Loop the sheets and the celldata
+    for sheet_name, sheet_rows in all_sheets_data.items():
+        print(f"Processing sheet: {sheet_name}")
+        for row in sheet_rows:
+            parsed_date = parse_date(row['Date'])
+            date_str = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
+
+            # Update existing rows and cells of data or create if none-existing
+            Google_Sheets_Data.objects.update_or_create(
+                PK_Unique=row.get('PK_Unique'),  # Use PK_Unique as the lookup field also for later
+                defaults={
+                    'UserID': clean_value(row.get('UserID')),
+                    'Username': clean_value(row.get('Username')),
+                    'Date': clean_value(date_str),
+                    'Food': clean_value(row.get('Food')),
+                    'Stuff': clean_value(row.get('Stuff')),
+                    'Leisure': clean_value(row.get('Leisure')),
+                    'Automatic_withdrawal': clean_value(row.get('Automatic_withdrawal')),
+                    'Automatic_withdrawal_com': clean_value(row.get('Automatic_withdrawal_com')),
+                    'SMBC_payments': clean_value(row.get('SMBC_payments')),
+                    'SMBC_card_comments': clean_value(row.get('SMBC_card_comments')),
+                    'Utility': clean_value(row.get('Utility')),
+                    'Details_utility': clean_value(row.get('Details_utility')),
+                    'Total_amount': clean_value(row.get('Total_amount')),
+                    'Name_sheet': sheet_name,
+                }
+            )
+            print(f"Processed row: {row['PK_Unique']}")
+
+    print("Webhook processed successfully.")
+
+    # Call the update dashboard data so it can be send to the front-end
+    update_dashboard_data()
+
+    # Show all processed sheets and rows
+    return JsonResponse({
+        "status": "success",
+        "message": "Data saved to the database.",
+        "rows_processed": sum(len(rows) for rows in all_sheets_data.values()),
+        "sheets_processed": list(all_sheets_data.keys()),
+    })

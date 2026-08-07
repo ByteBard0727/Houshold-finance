@@ -157,6 +157,13 @@ APPS_SCRIPT_RECEIPT_TIMEOUT = config(
     cast=float,
 )
 
+# Authenticates Google Apps Script notifications sent to /expenses_webhook/.
+# This is intentionally separate from the secret used for receipt writes.
+EXPENSES_WEBHOOK_SHARED_SECRET = config(
+    "EXPENSES_WEBHOOK_SHARED_SECRET",
+    default="",
+)
+
 # WhiteNoise storage (for production + gzip + hashed files)
 # Development-friendly storage (copy everything, ignore missing references)
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
