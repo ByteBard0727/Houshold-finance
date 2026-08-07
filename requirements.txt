@@ -31,6 +31,6 @@ django-cors-headers==4.6.0
 # HTTP requests & environment management
 requests==2.32.3
 python-decouple==3.8
-Pillow==11.1.0
+Pillow>=11.1.0
 
 whitenoise==6.7.0
