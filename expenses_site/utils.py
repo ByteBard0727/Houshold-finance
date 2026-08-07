@@ -1,5 +1,5 @@
-#utils.py
-import pandas as pd
+from datetime import datetime
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from expense_upload import models
@@ -34,6 +34,27 @@ def normalize_sheet_headers(headers):
         )
     return normalized_headers
 
+
+def parse_sheet_date(value):
+    """Parse a supported Sheet date into a naive local datetime."""
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    for date_format in (
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+        "%d-%m-%Y",
+    ):
+        try:
+            return datetime.strptime(value.strip(), date_format)
+        except ValueError:
+            continue
+    return None
+
 #up until here works 200
 def fetch_google_sheet_data(spreadsheet_id):
     global global_google_sheets_data
@@ -57,33 +78,18 @@ def fetch_google_sheet_data(spreadsheet_id):
        #works
 
         data = result.get("values", [])
+        sheet_rows = []
         if data:
             headers = normalize_sheet_headers(data[0])
-            rows = data[1:]
-            df = pd.DataFrame(rows, columns=headers)
-            #works
+            for values in data[1:]:
+                row = {
+                    header: values[index] if index < len(values) else ""
+                    for index, header in enumerate(headers)
+                }
+                row["Date"] = parse_sheet_date(row.get("Date"))
+                sheet_rows.append(row)
 
-            # Custom date parsing
-            def try_parse_date(date_str):
-                if pd.isna(date_str) or not date_str.strip():
-                    return None
-                formats = [
-                    "%Y-%m-%d",
-                    "%Y/%m/%d",
-                    "%d/%m/%Y",
-                    "%m/%d/%Y",
-                    "%d-%m-%Y",
-                ]
-                for fmt in formats:
-                    try:
-                        return pd.to_datetime(date_str, format=fmt)
-                    except ValueError:
-                        continue
-                return None
-
-            df["Date"] = df["Date"].apply(try_parse_date)
-
-        data_frames[sheet_title] = df
+        data_frames[sheet_title] = sheet_rows
 
     global_google_sheets_data = data_frames  
     print("fetching google sheets data")

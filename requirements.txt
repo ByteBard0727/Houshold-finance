@@ -9,10 +9,7 @@ redis==6.1.0
 # PostgreSQL driver for Supabase
 psycopg2-binary==2.9.10
 
-# Data processing
-pandas==2.2.3
-numpy==2.2.1
-django-pandas==0.6.7
+# Date handling
 python-dateutil==2.9.0.post0
 pytz==2024.2
 tzdata==2024.2

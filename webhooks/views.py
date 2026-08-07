@@ -3,7 +3,6 @@ from expenses_site.utils import fetch_google_sheet_data, RANGE_NAME, SPREADSHEET
 from expense_upload.models import Google_Sheets_Data
 from datetime import datetime
 from django.views.decorators.csrf import csrf_exempt
-import pandas as pd
 from django.db import transaction
 from dashboard.views import update_dashboard_data
 from django.db import transaction, connection
@@ -46,11 +45,11 @@ def google_sheet_webhook(request):
         print("Received webhook data. Processing sheets...")
 
         # Loop the sheets and the celldata
-        for sheet_name, data_frame in all_sheets_data.items():
+        for sheet_name, sheet_rows in all_sheets_data.items():
             print(f"Processing sheet: {sheet_name}")
-            for _, row in data_frame.iterrows():
+            for row in sheet_rows:
                 parsed_date = parse_date(row['Date'])
-                date_str = None if pd.isna(parsed_date) else parsed_date.strftime('%Y-%m-%d')
+                date_str = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
 
                 # Update existing rows and cells of data or create if none-existing
                 Google_Sheets_Data.objects.update_or_create(
@@ -83,7 +82,7 @@ def google_sheet_webhook(request):
         return JsonResponse({
             "status": "success",
             "message": "Data saved to the database.",
-            "rows_processed": sum(len(df) for df in all_sheets_data.values()),
+            "rows_processed": sum(len(rows) for rows in all_sheets_data.values()),
             "sheets_processed": list(all_sheets_data.keys()),
         })
 

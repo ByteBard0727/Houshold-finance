@@ -85,3 +85,13 @@ class SheetHeaderNormalizationTests(TestCase):
             "Details_utility",
             "Total_amount",
         ])
+
+    def test_sheet_date_parser_supports_current_workbook_format(self):
+        from expenses_site.utils import parse_sheet_date
+
+        self.assertEqual(
+            parse_sheet_date("2026/2/12"),
+            datetime(2026, 2, 12),
+        )
+        self.assertIsNone(parse_sheet_date(""))
+        self.assertIsNone(parse_sheet_date("合計"))
