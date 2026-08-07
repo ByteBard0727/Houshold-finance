@@ -128,8 +128,6 @@ RECEIPT_WRITE_SHARED_SECRET
 EXPENSES_WEBHOOK_SHARED_SECRET
 ```
 
-Never commit their values.
-
 ## Local development
 
 ```bash
