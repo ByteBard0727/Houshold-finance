@@ -54,6 +54,12 @@
 <body>
 <main>
     <section class="card">
+        {% if batch_total %}
+            <p><strong>Receipt {{ batch_position }} of {{ batch_total }}</strong></p>
+            {% if batch_failed_count %}
+                <p>{{ batch_failed_count }} uploaded receipt{{ batch_failed_count|pluralize }} could not be parsed and remain stored.</p>
+            {% endif %}
+        {% endif %}
         {% if confirmed %}
             <h1>Receipt confirmed</h1>
             <div class="success" role="status">
@@ -64,6 +70,9 @@
             </div>
             {% if receipt.status == 'synced' %}
                 <p class="success" role="status">Google Sheets was updated successfully.</p>
+                {% if next_receipt_id %}
+                    <a class="button-link" href="{% url 'confirm_receipt' next_receipt_id %}">Review next receipt</a>
+                {% endif %}
             {% elif receipt.status == 'sync_failed' %}
                 <div class="errorlist" role="alert">
                     Google Sheets update failed: {{ receipt.error_message }}
@@ -76,7 +85,7 @@
                 <p>Google Sheets has not been updated yet.</p>
                 <form method="post" action="{% url 'sync_receipt' receipt.id %}">
                     {% csrf_token %}
-                    <button type="submit">Send to Google Sheets</button>
+                    <button type="submit">Send to Google Sheets{% if next_receipt_id %} and review next{% endif %}</button>
                 </form>
             {% endif %}
             <a class="button-link" href="{% url 'upload_receipt' %}">Upload another receipt</a>
@@ -86,7 +95,7 @@
             <form method="post">
                 {% csrf_token %}
                 {{ form.as_p }}
-                <button type="submit">Confirm receipt</button>
+                <button type="submit">Confirm receipt{% if batch_total %} {{ batch_position }} of {{ batch_total }}{% endif %}</button>
             </form>
         {% endif %}
     </section>

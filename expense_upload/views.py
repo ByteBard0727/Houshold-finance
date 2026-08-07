@@ -7,16 +7,52 @@ from .forms import ReceiptConfirmationForm, ReceiptUploadForm
 from .models import Receipt
 from .services import process_receipt, process_receipt_sync
 
+REVIEW_QUEUE_SESSION_KEY = "receipt_review_queue"
+FAILED_BATCH_SESSION_KEY = "receipt_batch_failed_count"
+
+
+def _review_queue_context(request, receipt):
+    queue = request.session.get(REVIEW_QUEUE_SESSION_KEY, [])
+    receipt_id = str(receipt.id)
+    if receipt_id not in queue:
+        return {}
+
+    position = queue.index(receipt_id)
+    next_id = queue[position + 1] if position + 1 < len(queue) else None
+    return {
+        "batch_position": position + 1,
+        "batch_total": len(queue),
+        "next_receipt_id": next_id,
+        "batch_failed_count": request.session.get(FAILED_BATCH_SESSION_KEY, 0),
+    }
+
 
 @require_http_methods(["GET", "POST"])
 def upload_receipt(request):
     receipt = None
+    receipts = []
 
     if request.method == "POST":
         form = ReceiptUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            receipt = Receipt.objects.create(image=form.cleaned_data["image"])
-            process_receipt(receipt)
+            for image in form.cleaned_data["images"]:
+                current_receipt = Receipt.objects.create(image=image)
+                process_receipt(current_receipt)
+                current_receipt.refresh_from_db()
+                receipts.append(current_receipt)
+
+            review_queue = [
+                str(current_receipt.id)
+                for current_receipt in receipts
+                if current_receipt.status == Receipt.Status.EXTRACTED
+            ]
+            request.session[REVIEW_QUEUE_SESSION_KEY] = review_queue
+            request.session[FAILED_BATCH_SESSION_KEY] = len(receipts) - len(review_queue)
+
+            if len(receipts) > 1 and review_queue:
+                return redirect(reverse("confirm_receipt", args=[review_queue[0]]))
+
+            receipt = receipts[0]
             form = ReceiptUploadForm()
     else:
         form = ReceiptUploadForm()
@@ -24,7 +60,7 @@ def upload_receipt(request):
     return render(
         request,
         "expense_upload/receipt_upload.html",
-        {"form": form, "receipt": receipt},
+        {"form": form, "receipt": receipt, "receipts": receipts},
     )
 
 
@@ -38,10 +74,12 @@ def confirm_receipt(request, receipt_id):
         Receipt.Status.SYNC_FAILED,
     }
     if request.method == "GET" and receipt.status in review_complete_statuses:
+        context = {"receipt": receipt, "confirmed": True}
+        context.update(_review_queue_context(request, receipt))
         return render(
             request,
             "expense_upload/receipt_confirmation.html",
-            {"receipt": receipt, "confirmed": True},
+            context,
         )
 
     if receipt.status != Receipt.Status.EXTRACTED or not receipt.extracted_json:
@@ -74,10 +112,12 @@ def confirm_receipt(request, receipt_id):
             }
         )
 
+    context = {"form": form, "receipt": receipt, "confirmed": False}
+    context.update(_review_queue_context(request, receipt))
     return render(
         request,
         "expense_upload/receipt_confirmation.html",
-        {"form": form, "receipt": receipt, "confirmed": False},
+        context,
     )
 
 
@@ -87,5 +127,13 @@ def sync_receipt(request, receipt_id):
     if receipt.status not in {Receipt.Status.CONFIRMED, Receipt.Status.SYNC_FAILED}:
         raise Http404("Receipt is not ready for synchronization.")
 
-    process_receipt_sync(receipt)
+    succeeded = process_receipt_sync(receipt)
+    if succeeded:
+        queue_context = _review_queue_context(request, receipt)
+        next_receipt_id = queue_context.get("next_receipt_id")
+        if next_receipt_id:
+            return redirect(reverse("confirm_receipt", args=[next_receipt_id]))
+
+        request.session.pop(REVIEW_QUEUE_SESSION_KEY, None)
+        request.session.pop(FAILED_BATCH_SESSION_KEY, None)
     return redirect(reverse("confirm_receipt", args=[receipt.id]))

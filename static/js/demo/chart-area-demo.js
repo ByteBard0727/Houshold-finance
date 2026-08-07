@@ -118,7 +118,7 @@ var myLineChart = new Chart(ctx, {
 });
 
 // Current view state
-let currentView = 'monthly';
+let currentView = 'daily';
 let selectedMonth = null;
 
 // Function to update the top stats cards
@@ -338,11 +338,21 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Update stats cards with new month
             updateStatsCards(selectedMonth);
-            
-            // If currently viewing daily or weekly, update the chart
-            if (currentView === 'daily' || currentView === 'weekly') {
-                updateChartView(currentView);
+
+            // The monthly overview is a cross-month trend and cannot display
+            // one selected month. An explicit month selection therefore opens
+            // that month's daily detail; daily/weekly views keep their mode.
+            if (currentView === 'monthly') {
+                currentView = 'daily';
+                viewOptions.forEach(option => {
+                    option.classList.toggle(
+                        'active',
+                        option.getAttribute('data-view') === currentView
+                    );
+                });
             }
+
+            updateChartView(currentView);
         });
     } else {
         console.error('Month selector not found in DOM!');

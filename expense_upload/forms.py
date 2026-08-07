@@ -2,32 +2,46 @@ from django import forms
 from django.conf import settings
 
 
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultipleImageField(forms.ImageField):
+    widget = MultipleFileInput
+
+    def clean(self, data, initial=None):
+        files = data if isinstance(data, (list, tuple)) else [data]
+        clean_file = super().clean
+        return [clean_file(receipt, initial) for receipt in files]
+
+
 class ReceiptUploadForm(forms.Form):
-    image = forms.ImageField(
-        label="Receipt photo",
-        help_text="JPEG or PNG",
-        widget=forms.ClearableFileInput(
+    images = MultipleImageField(
+        label="Receipt photos",
+        help_text="Select one or more JPEG or PNG receipts.",
+        widget=MultipleFileInput(
             attrs={
                 "accept": "image/jpeg,image/png",
-                "capture": "environment",
+                "multiple": True,
             }
         ),
     )
 
-    def clean_image(self):
-        image = self.cleaned_data["image"]
+    def clean_images(self):
+        images = self.cleaned_data["images"]
         max_size = settings.RECEIPT_MAX_UPLOAD_SIZE
 
-        if image.size > max_size:
-            max_megabytes = max_size // (1024 * 1024)
-            raise forms.ValidationError(
-                f"The image must be no larger than {max_megabytes} MB."
-            )
+        for image in images:
+            if image.size > max_size:
+                max_megabytes = max_size // (1024 * 1024)
+                raise forms.ValidationError(
+                    f"Each image must be no larger than {max_megabytes} MB."
+                )
 
-        if image.image.format not in {"JPEG", "PNG"}:
-            raise forms.ValidationError("Upload a JPEG or PNG receipt image.")
+            if image.image.format not in {"JPEG", "PNG"}:
+                raise forms.ValidationError("Upload only JPEG or PNG receipt images.")
 
-        return image
+        return images
 
 
 class ReceiptConfirmationForm(forms.Form):

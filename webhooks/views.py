@@ -19,7 +19,13 @@ def parse_date(date_value):
         return date_value
     elif isinstance(date_value, str):
         # These are different formats a date can appear in
-        date_formats = ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y']
+        date_formats = [
+            '%Y-%m-%d',
+            '%Y/%m/%d',
+            '%d/%m/%Y',
+            '%m/%d/%Y',
+            '%d-%m-%Y',
+        ]
         for fmt in date_formats:
             try:
                 return datetime.strptime(date_value, fmt)

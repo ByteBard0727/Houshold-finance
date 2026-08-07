@@ -34,8 +34,15 @@ document.addEventListener("DOMContentLoaded", function () {
         const monthlyResponse = await fetch(`/dashboard/get_monthly_expenses/?sheet_name=${sheetName}`);
         const monthlyData = await monthlyResponse.json();
 
-        // Update the progress bar spans with the percentage values
+        if (!monthlyResponse.ok || monthlyData.error) {
+            throw new Error(monthlyData.error || `HTTP ${monthlyResponse.status}`);
+        }
+
+        // The progress bars and pie chart intentionally share this response.
         updateProgressBars(monthlyData);
+        if (typeof window.updateExpensePie === "function") {
+            window.updateExpensePie(monthlyData);
+        }
     } catch (error) {
         console.error("Error fetching chart data:", error);
     }

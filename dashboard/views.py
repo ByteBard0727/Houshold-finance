@@ -25,9 +25,12 @@ def get_month_number(sheet_name):
     return month_map.get(month_abbr)
 
 def get_pk_unique(sheet_name):
-    """Helper function to get PK_Unique value based on the month name."""
-    month_num = get_month_number(sheet_name)
-    return 32 * month_num if month_num else None
+    """Return the total row's PK, which is the highest PK in the sheet."""
+    return (
+        Google_Sheets_Data.objects
+        .filter(Name_sheet=sheet_name)
+        .aggregate(total_pk=Max("PK_Unique"))["total_pk"]
+    )
 
 def get_total_spend(sheet_name):
     """Fetches the total spend for the given sheet from row 32 (the total row)."""
@@ -35,26 +38,27 @@ def get_total_spend(sheet_name):
     total_entry = Google_Sheets_Data.objects.filter(
         Name_sheet=sheet_name, PK_Unique=pk_unique_value
     ).values("Total_amount").first()
-    if not total_entry or total_entry.get("Total_amount") is None:
+    if not total_entry:
         raise ValueError(f"No total data found for sheet {sheet_name}")
-    return total_entry["Total_amount"]
+    return total_entry["Total_amount"] or 0
 
 def get_total_spend_bulk(sheet_names):
     """Get total spend for multiple sheets in ONE query - optimized version."""
     if not sheet_names:
         return {}
     
-    pk_values = [get_pk_unique(sheet) for sheet in sheet_names if get_pk_unique(sheet)]
-    
-    # Single query to fetch all total rows at once
-    totals = Google_Sheets_Data.objects.filter(
-        Name_sheet__in=sheet_names,
-        PK_Unique__in=pk_values
-    ).values('Name_sheet', 'Total_amount', 'PK_Unique')
-    
-    # Create a dictionary mapping sheet_name to total_amount
-    totals_dict = {entry['Name_sheet']: entry['Total_amount'] or 0 for entry in totals}
-    
+    # Rows are ordered with each sheet's total row first. Keeping the first row
+    # per sheet avoids assuming that January always ends at PK 32, etc.
+    rows = (
+        Google_Sheets_Data.objects
+        .filter(Name_sheet__in=sheet_names)
+        .values("Name_sheet", "Total_amount", "PK_Unique")
+        .order_by("Name_sheet", "-PK_Unique")
+    )
+    totals_dict = {}
+    for entry in rows:
+        totals_dict.setdefault(entry["Name_sheet"], entry["Total_amount"] or 0)
+
     return totals_dict
 
 def _get_monthly_expenses(sheet_name):
@@ -216,6 +220,14 @@ def get_sheets(request):
     
     # Sort by date (most recent first)
     sheet_names.sort(key=sheet_to_date, reverse=True)
+
+    # Future worksheet templates may already exist. Prefer the actual current
+    # month for both dashboard selectors, then retain newest-first ordering for
+    # every other available sheet.
+    current_sheet = datetime.now().strftime("%b%Y")
+    if current_sheet in sheet_names:
+        sheet_names.remove(current_sheet)
+        sheet_names.insert(0, current_sheet)
     
     # Limit to 12 most recent
     formatted_sheets = [{"name": sheet, "value": sheet} for sheet in sheet_names]

@@ -13,6 +13,27 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SPREADSHEET_ID = '1Jn04_Hc_XHs3MxAFoCYFlruLIparHOqL8Q_PHUiuZ68'
 RANGE_NAME = 'A1:O33'
 
+SHEET_HEADER_ALIASES = {
+    "Automatic withdrawal": "Automatic_withdrawal",
+    "Automatic withdrawal details": "Automatic_withdrawal_com",
+    "SMBC credit card payment": "SMBC_payments",
+    "SMBC credit card payment details": "SMBC_card_comments",
+    "Utility(Gas, Electricity, Water＆Sewage)": "Utility",
+    "Details of utility": "Details_utility",
+    "Total amount": "Total_amount",
+}
+
+
+def normalize_sheet_headers(headers):
+    """Map the workbook's display headers to the legacy projection fields."""
+    normalized_headers = []
+    for header in headers:
+        normalized_header = " ".join(str(header).split())
+        normalized_headers.append(
+            SHEET_HEADER_ALIASES.get(normalized_header, normalized_header)
+        )
+    return normalized_headers
+
 #up until here works 200
 def fetch_google_sheet_data(spreadsheet_id):
     global global_google_sheets_data
@@ -37,7 +58,7 @@ def fetch_google_sheet_data(spreadsheet_id):
 
         data = result.get("values", [])
         if data:
-            headers = data[0]
+            headers = normalize_sheet_headers(data[0])
             rows = data[1:]
             df = pd.DataFrame(rows, columns=headers)
             #works
@@ -46,7 +67,13 @@ def fetch_google_sheet_data(spreadsheet_id):
             def try_parse_date(date_str):
                 if pd.isna(date_str) or not date_str.strip():
                     return None
-                formats = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]
+                formats = [
+                    "%Y-%m-%d",
+                    "%Y/%m/%d",
+                    "%d/%m/%Y",
+                    "%m/%d/%Y",
+                    "%d-%m-%Y",
+                ]
                 for fmt in formats:
                     try:
                         return pd.to_datetime(date_str, format=fmt)

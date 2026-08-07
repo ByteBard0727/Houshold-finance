@@ -44,7 +44,7 @@ class ReceiptUploadTests(TestCase):
         response = self.client.get(reverse("upload_receipt"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Upload a receipt")
+        self.assertContains(response, "Upload receipts")
 
     @patch("expense_upload.views.process_receipt")
     def test_valid_image_starts_receipt_processing(self, process_receipt_mock):
@@ -54,7 +54,7 @@ class ReceiptUploadTests(TestCase):
             content_type="image/png",
         )
 
-        response = self.client.post(reverse("upload_receipt"), {"image": image})
+        response = self.client.post(reverse("upload_receipt"), {"images": image})
 
         receipt = Receipt.objects.get()
         self.assertEqual(response.status_code, 200)
@@ -72,7 +72,7 @@ class ReceiptUploadTests(TestCase):
             content_type="text/plain",
         )
 
-        response = self.client.post(reverse("upload_receipt"), {"image": upload})
+        response = self.client.post(reverse("upload_receipt"), {"images": upload})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "valid image")
@@ -86,11 +86,45 @@ class ReceiptUploadTests(TestCase):
             content_type="image/png",
         )
 
-        response = self.client.post(reverse("upload_receipt"), {"image": image})
+        response = self.client.post(reverse("upload_receipt"), {"images": image})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "no larger than 0 MB")
         self.assertFalse(Receipt.objects.exists())
+
+    @patch("expense_upload.views.process_receipt")
+    def test_multiple_images_start_review_queue_in_upload_order(self, process_mock):
+        def mark_extracted(receipt):
+            receipt.status = Receipt.Status.EXTRACTED
+            receipt.extracted_json = {
+                "store_name": "店",
+                "receipt_date": "2026-08-07",
+                "total_amount": 100,
+                "category": "Stuff",
+                "items": [],
+            }
+            receipt.save(update_fields=["status", "extracted_json"])
+
+        process_mock.side_effect = mark_extracted
+        first = SimpleUploadedFile("first.png", PNG_IMAGE, content_type="image/png")
+        second = SimpleUploadedFile("second.png", PNG_IMAGE, content_type="image/png")
+
+        response = self.client.post(
+            reverse("upload_receipt"),
+            {"images": [first, second]},
+        )
+
+        receipts = list(Receipt.objects.order_by("created_at"))
+        self.assertEqual(len(receipts), 2)
+        self.assertRedirects(
+            response,
+            reverse("confirm_receipt", args=[receipts[0].id]),
+        )
+        self.assertEqual(
+            self.client.session["receipt_review_queue"],
+            [str(receipt.id) for receipt in receipts],
+        )
+        self.assertEqual(process_mock.call_count, 2)
 
 
 class StubProvider:
@@ -334,6 +368,28 @@ class ReceiptSheetSyncTests(TestCase):
         )
         sync_mock.assert_called_once()
         self.assertEqual(sync_mock.call_args.args[0].id, self.receipt.id)
+
+    @patch("expense_upload.views.process_receipt_sync", return_value=True)
+    def test_successful_batch_sync_advances_to_next_receipt(self, sync_mock):
+        next_receipt = Receipt.objects.create(
+            image="receipts/next.png",
+            status=Receipt.Status.EXTRACTED,
+            extracted_json=self.confirmed_data.copy(),
+        )
+        session = self.client.session
+        session["receipt_review_queue"] = [
+            str(self.receipt.id),
+            str(next_receipt.id),
+        ]
+        session.save()
+
+        response = self.client.post(self.sync_url)
+
+        self.assertRedirects(
+            response,
+            reverse("confirm_receipt", args=[next_receipt.id]),
+        )
+        sync_mock.assert_called_once()
 
     @patch("expense_upload.views.process_receipt_sync")
     def test_sync_failed_receipt_can_be_retried(self, sync_mock):
