@@ -16,4 +16,5 @@ urlpatterns = [
     
     # New endpoint for month stats
     path('get_month_stats/', views.get_month_stats, name='get_month_stats'),
+    path('get_yearly_summary/', views.get_yearly_summary_data, name='get_yearly_summary'),
 ]

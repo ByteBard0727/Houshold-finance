@@ -495,15 +495,47 @@
                                 <div class="col-12 mb-4">
                                     <div class="card shadow mb-4">
                                         <div class="card-header py-3">
-                                            <h6 class="m-0 font-weight-bold text-primary">Monthly Expense Sheet - Editable</h6>
+                                            <div class="year-summary-heading">
+                                                <label for="year-summary-select">Total</label>
+                                                <select id="year-summary-select" aria-label="Select summary year">
+                                                    {% for year in available_years %}
+                                                        <option value="{{ year }}"{% if year == yearly_summary.year %} selected{% endif %}>{{ year }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                                <span id="year-summary-status" class="sr-only" aria-live="polite"></span>
+                                            </div>
                                         </div>
                                         <div class="card-body p-0">
-                                            <div class="iframe-container">
-                                                <iframe 
-                                                    src="https://docs.google.com/spreadsheets/d/1Jn04_Hc_XHs3MxAFoCYFlruLIparHOqL8Q_PHUiuZ68/edit?usp=sharing&rm=minimal"
-                                                    frameborder="0"
-                                                    allowfullscreen>
-                                                </iframe>
+                                            <div class="year-summary-container" data-summary-url="{% url 'get_yearly_summary' %}">
+                                                <table class="year-summary-table">
+                                                    <caption class="sr-only">Monthly household spending summary for {{ yearly_summary.year }}</caption>
+                                                    <thead>
+                                                        <tr>
+                                                            <th scope="col">Month</th>
+                                                            <th scope="col"><span class="column-number">1</span> Shared account spending</th>
+                                                            <th scope="col"><span class="column-number">2</span> SMBC credit payment</th>
+                                                            <th scope="col">Total <span class="formula">(1 + 2)</span></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="year-summary-body">
+                                                        {% for month in yearly_summary.months %}
+                                                            <tr>
+                                                                <th scope="row">{{ month.label }}</th>
+                                                                <td data-label="Shared">¥{{ month.shared }}</td>
+                                                                <td data-label="SMBC">¥{{ month.smbc }}</td>
+                                                                <td data-label="Total">¥{{ month.total }}</td>
+                                                            </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                    <tfoot id="year-summary-footer">
+                                                        <tr>
+                                                            <th scope="row">Total {{ yearly_summary.year }}</th>
+                                                            <td data-label="Shared">¥{{ yearly_summary.shared_total }}</td>
+                                                            <td data-label="SMBC">¥{{ yearly_summary.smbc_total }}</td>
+                                                            <td data-label="Total">¥{{ yearly_summary.total }}</td>
+                                                        </tr>
+                                                    </tfoot>
+                                                </table>
                                             </div>
                                         </div>
                                     </div>
@@ -573,6 +605,65 @@
     <script src="/static/js/demo/chart-area-demo.js?v=2.2"></script>
     <script src="/static/js/demo/chart-pie-demo.js?v=2.1"></script>
     <script src="/static/js/demo/chart-bar-demo.js?v=2.1"></script>
+
+    <script>
+        (function () {
+            const select = document.getElementById("year-summary-select");
+            const container = document.querySelector(".year-summary-container");
+            const body = document.getElementById("year-summary-body");
+            const footer = document.getElementById("year-summary-footer");
+            const status = document.getElementById("year-summary-status");
+            if (!select || !container || !body || !footer) return;
+
+            function moneyCell(label, value) {
+                const cell = document.createElement("td");
+                cell.dataset.label = label;
+                cell.textContent = "¥" + value;
+                return cell;
+            }
+
+            function renderSummary(summary) {
+                body.replaceChildren();
+                summary.months.forEach(function (month) {
+                    const row = document.createElement("tr");
+                    const heading = document.createElement("th");
+                    heading.scope = "row";
+                    heading.textContent = month.label;
+                    row.append(heading, moneyCell("Shared", month.shared), moneyCell("SMBC", month.smbc), moneyCell("Total", month.total));
+                    body.appendChild(row);
+                });
+
+                const row = document.createElement("tr");
+                const heading = document.createElement("th");
+                heading.scope = "row";
+                heading.textContent = "Total " + summary.year;
+                row.append(heading, moneyCell("Shared", summary.shared_total), moneyCell("SMBC", summary.smbc_total), moneyCell("Total", summary.total));
+                footer.replaceChildren(row);
+            }
+
+            select.addEventListener("change", async function () {
+                const previousYear = select.dataset.currentYear || "{{ yearly_summary.year }}";
+                select.disabled = true;
+                status.textContent = "Loading " + select.value + " summary";
+                try {
+                    const response = await fetch(container.dataset.summaryUrl + "?year=" + encodeURIComponent(select.value), {
+                        headers: {"X-Requested-With": "XMLHttpRequest"}
+                    });
+                    if (!response.ok) throw new Error("Summary request failed");
+                    const summary = await response.json();
+                    renderSummary(summary);
+                    select.dataset.currentYear = String(summary.year);
+                    status.textContent = summary.year + " summary loaded";
+                } catch (error) {
+                    select.value = previousYear;
+                    status.textContent = "Could not load that year";
+                } finally {
+                    select.disabled = false;
+                }
+            });
+            select.dataset.currentYear = select.value;
+        }());
+    </script>
 
 </body>
 

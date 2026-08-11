@@ -1,38 +1,172 @@
-/* Responsive Google Sheets iframe */
-.iframe-container {
-    position: relative;
-    width: 100%;
-    padding-bottom: 75%; /* 4:3 aspect ratio */
-    height: 0;
+.year-summary-heading {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.year-summary-heading label {
+    color: var(--dashboard-accent);
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.year-summary-heading select {
+    appearance: auto;
+    background: var(--dashboard-surface);
+    border: 1px solid var(--dashboard-border);
+    border-radius: 0.4rem;
+    color: var(--dashboard-text);
+    font: inherit;
+    font-weight: 700;
+    min-height: 2.25rem;
+    padding: 0.3rem 1.75rem 0.3rem 0.65rem;
+}
+
+.year-summary-heading select:focus {
+    border-color: var(--dashboard-accent);
+    box-shadow: 0 0 0 0.15rem rgba(49, 92, 155, 0.2);
+    outline: 0;
+}
+
+.year-summary-container {
     overflow: hidden;
+    padding: 0.75rem;
 }
 
-.iframe-container iframe {
-    position: absolute;
-    top: 0;
-    left: 0;
+.year-summary-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--dashboard-text);
+    font-variant-numeric: tabular-nums;
     width: 100%;
-    height: 100%;
-    border: 0;
 }
 
-/* Mobile devices - taller for better scrolling */
-@media (max-width: 768px) {
-    .iframe-container {
-        padding-bottom: 120%;
+.year-summary-table th,
+.year-summary-table td {
+    border-bottom: 1px solid var(--dashboard-border);
+    padding: 0.8rem 0.9rem;
+    text-align: right;
+    vertical-align: middle;
+}
+
+.year-summary-table th:first-child {
+    text-align: left;
+}
+
+.year-summary-table thead th {
+    background: var(--dashboard-surface-muted);
+    color: var(--dashboard-muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.025em;
+    line-height: 1.35;
+    text-transform: uppercase;
+}
+
+.year-summary-table tbody tr:hover {
+    background: var(--dashboard-surface-muted);
+}
+
+.year-summary-table tbody th {
+    font-weight: 600;
+}
+
+.year-summary-table tbody td:last-child,
+.year-summary-table tfoot td:last-child {
+    color: var(--dashboard-accent);
+    font-weight: 700;
+}
+
+.year-summary-table tfoot th,
+.year-summary-table tfoot td {
+    background: var(--dashboard-surface-muted);
+    border-bottom: 0;
+    border-top: 2px solid var(--dashboard-border);
+    font-weight: 700;
+}
+
+.column-number {
+    align-items: center;
+    background: var(--dashboard-accent);
+    border-radius: 50%;
+    color: #fff;
+    display: inline-flex;
+    height: 1.25rem;
+    justify-content: center;
+    margin-right: 0.2rem;
+    width: 1.25rem;
+}
+
+.formula {
+    white-space: nowrap;
+}
+
+@media (max-width: 575.98px) {
+    .year-summary-container {
+        padding: 0.65rem;
     }
-}
 
-/* Tablets */
-@media (min-width: 769px) and (max-width: 1024px) {
-    .iframe-container {
-        padding-bottom: 90%;
+    .year-summary-table,
+    .year-summary-table tbody,
+    .year-summary-table tfoot,
+    .year-summary-table tr {
+        display: block;
+        width: 100%;
     }
-}
 
-/* Desktop - wider aspect ratio */
-@media (min-width: 1025px) {
-    .iframe-container {
-        padding-bottom: 60%;
+    .year-summary-table thead {
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        height: 1px;
+        overflow: hidden;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
+    }
+
+    .year-summary-table tbody tr,
+    .year-summary-table tfoot tr {
+        background: var(--dashboard-surface-muted);
+        border: 1px solid var(--dashboard-border);
+        border-radius: 0.5rem;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-bottom: 0.65rem;
+        overflow: hidden;
+    }
+
+    .year-summary-table tbody th,
+    .year-summary-table tfoot th {
+        border-bottom: 1px solid var(--dashboard-border);
+        grid-column: 1 / -1;
+        padding: 0.65rem 0.75rem;
+    }
+
+    .year-summary-table td {
+        border-bottom: 0;
+        font-size: 0.84rem;
+        min-width: 0;
+        padding: 0.55rem 0.3rem 0.65rem;
+        text-align: center;
+    }
+
+    .year-summary-table td::before {
+        color: var(--dashboard-muted);
+        content: attr(data-label);
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.2rem;
+        text-transform: uppercase;
+    }
+
+    .year-summary-table td + td {
+        border-left: 1px solid var(--dashboard-border);
+    }
+
+    .year-summary-table tfoot th,
+    .year-summary-table tfoot td {
+        border-top: 0;
     }
 }

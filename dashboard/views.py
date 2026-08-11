@@ -6,6 +6,7 @@ from django.db.models import Sum, Max
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
 from datetime import datetime
+from calendar import month_name
 from .consumers import DashboardConsumer
 
 # Global variable for caching dashboard data
@@ -60,6 +61,66 @@ def get_total_spend_bulk(sheet_names):
         totals_dict.setdefault(entry["Name_sheet"], entry["Total_amount"] or 0)
 
     return totals_dict
+
+
+def get_yearly_summary(year):
+    """Build a twelve-month summary from each worksheet's total row."""
+    sheet_names = [datetime(year, month, 1).strftime("%b%Y") for month in range(1, 13)]
+    rows = (
+        Google_Sheets_Data.objects
+        .filter(Name_sheet__in=sheet_names)
+        .values("Name_sheet", "Total_amount", "SMBC_payments", "PK_Unique")
+        .order_by("Name_sheet", "-PK_Unique")
+    )
+    total_rows = {}
+    for row in rows:
+        total_rows.setdefault(row["Name_sheet"], row)
+
+    months = []
+    shared_year_total = 0
+    smbc_year_total = 0
+    year_total = 0
+
+    for month in range(1, 13):
+        sheet_name = datetime(year, month, 1).strftime("%b%Y")
+        total_row = total_rows.get(sheet_name, {})
+        shared = round(float(total_row.get("Total_amount") or 0))
+        smbc = round(float(total_row.get("SMBC_payments") or 0))
+        total = shared + smbc
+        months.append({
+            "label": f"{month_name[month]} {year}",
+            "shared": f"{shared:,}",
+            "smbc": f"{smbc:,}",
+            "total": f"{total:,}",
+        })
+        shared_year_total += shared
+        smbc_year_total += smbc
+        year_total += total
+
+    return {
+        "year": year,
+        "months": months,
+        "shared_total": f"{shared_year_total:,}",
+        "smbc_total": f"{smbc_year_total:,}",
+        "total": f"{year_total:,}",
+    }
+
+
+def get_available_years():
+    """Return workbook years newest first, always including the current year."""
+    current_year = datetime.now().year
+    years = {current_year}
+    sheet_names = (
+        Google_Sheets_Data.objects
+        .values_list("Name_sheet", flat=True)
+        .distinct()
+    )
+    for sheet_name in sheet_names:
+        try:
+            years.add(datetime.strptime(sheet_name, "%b%Y").year)
+        except (TypeError, ValueError):
+            continue
+    return sorted(years, reverse=True)
 
 def _get_monthly_expenses(sheet_name):
     """
@@ -134,10 +195,25 @@ def send_websocket_update():
 def dashboard(request):
     """Render the main dashboard page."""
     average_monthly_expenses_value = get_average_monthly_expenses()
+    yearly_summary = get_yearly_summary(datetime.now().year)
     
     return render(request, 'index.html', {
-        'average_monthly_expenses': average_monthly_expenses_value
+        'average_monthly_expenses': average_monthly_expenses_value,
+        'yearly_summary': yearly_summary,
+        'available_years': get_available_years(),
     })
+
+
+def get_yearly_summary_data(request):
+    """Return a selectable year's summary for the dashboard table."""
+    try:
+        year = int(request.GET.get("year", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "A valid year is required."}, status=400)
+
+    if year not in get_available_years():
+        return JsonResponse({"error": "That year is not available."}, status=404)
+    return JsonResponse(get_yearly_summary(year))
 
 def get_average_monthly_expenses():
     """Calculate average monthly expenses based on the last 12 sheets - optimized."""

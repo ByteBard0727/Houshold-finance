@@ -46,6 +46,12 @@
             text-decoration: none;
             width: 100%;
         }
+        button:disabled {
+            background: #8b949e;
+            color: #e9ecef;
+            cursor: not-allowed;
+            opacity: 1;
+        }
         .success { background: #e8f5e9; border-radius: 0.5rem; padding: 1rem; }
         .errorlist { color: #b00020; padding-left: 1.25rem; }
         .helptext { color: #5f6872; font-size: 0.9rem; }
@@ -77,13 +83,13 @@
                 <div class="errorlist" role="alert">
                     Google Sheets update failed: {{ receipt.error_message }}
                 </div>
-                <form method="post" action="{% url 'sync_receipt' receipt.id %}">
+                <form class="sync-receipt-form" method="post" action="{% url 'sync_receipt' receipt.id %}">
                     {% csrf_token %}
                     <button type="submit">Retry Google Sheets update</button>
                 </form>
             {% else %}
                 <p>Google Sheets has not been updated yet.</p>
-                <form method="post" action="{% url 'sync_receipt' receipt.id %}">
+                <form class="sync-receipt-form" method="post" action="{% url 'sync_receipt' receipt.id %}">
                     {% csrf_token %}
                     <button type="submit">Send to Google Sheets{% if next_receipt_id %} and review next{% endif %}</button>
                 </form>
@@ -100,5 +106,23 @@
         {% endif %}
     </section>
 </main>
+<script>
+    document.querySelectorAll(".sync-receipt-form").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            if (form.dataset.submitting === "true") {
+                event.preventDefault();
+                return;
+            }
+            var button = form.querySelector('button[type="submit"]');
+            if (!button) {
+                return;
+            }
+            form.dataset.submitting = "true";
+            button.disabled = true;
+            button.setAttribute("aria-disabled", "true");
+            button.textContent = "Sending to Google Sheets…";
+        });
+    });
+</script>
 </body>
 </html>

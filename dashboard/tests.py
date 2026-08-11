@@ -5,20 +5,29 @@ from django.test import RequestFactory, TestCase
 
 from expense_upload.models import Google_Sheets_Data
 
-from .views import get_month_stats, get_pk_unique, get_sheets, get_total_spend_bulk
+from .views import (
+    get_month_stats,
+    get_available_years,
+    get_pk_unique,
+    get_sheets,
+    get_total_spend_bulk,
+    get_yearly_summary,
+    get_yearly_summary_data,
+)
 
 
 class DynamicMonthlyTotalTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
-    def create_row(self, pk, sheet, total=None, date=None, food=None):
+    def create_row(self, pk, sheet, total=None, date=None, food=None, smbc=None):
         return Google_Sheets_Data.objects.create(
             PK_Unique=pk,
             Name_sheet=sheet,
             Total_amount=total,
             Date=date,
             Food=food,
+            SMBC_payments=smbc,
         )
 
     def test_total_row_uses_highest_pk_within_sheet(self):
@@ -60,6 +69,46 @@ class DynamicMonthlyTotalTests(TestCase):
 
         payload = json.loads(response.content)
         self.assertEqual(payload["sheets"][0]["value"], current_sheet)
+
+    def test_yearly_summary_uses_total_rows_and_includes_empty_months(self):
+        self.create_row(1, "Jan2026", total=100, smbc=10)
+        self.create_row(32, "Jan2026", total=214297, smbc=1590)
+        self.create_row(64, "Feb2026", total=207419, smbc=1590)
+
+        summary = get_yearly_summary(2026)
+
+        self.assertEqual(len(summary["months"]), 12)
+        self.assertEqual(summary["months"][0], {
+            "label": "January 2026",
+            "shared": "214,297",
+            "smbc": "1,590",
+            "total": "215,887",
+        })
+        self.assertEqual(summary["months"][2]["total"], "0")
+        self.assertEqual(summary["shared_total"], "421,716")
+        self.assertEqual(summary["smbc_total"], "3,180")
+        self.assertEqual(summary["total"], "424,896")
+
+    def test_available_years_include_workbook_and_current_year(self):
+        self.create_row(1, "Jan2024")
+
+        years = get_available_years()
+
+        self.assertIn(2024, years)
+        self.assertIn(datetime.now().year, years)
+        self.assertEqual(years, sorted(years, reverse=True))
+
+    def test_yearly_summary_endpoint_returns_selected_year(self):
+        self.create_row(1, "Jan2024", total=100, smbc=10)
+
+        response = get_yearly_summary_data(
+            self.factory.get("/dashboard/get_yearly_summary/", {"year": "2024"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["year"], 2024)
+        self.assertEqual(payload["months"][0]["total"], "110")
 
 
 class SheetHeaderNormalizationTests(TestCase):
