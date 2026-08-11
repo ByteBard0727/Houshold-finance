@@ -65,6 +65,10 @@ class ReceiptUploadTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Upload receipts")
+        self.assertContains(response, 'id="receipt-upload-form"')
+        self.assertContains(response, 'id="receipt-upload-button"')
+        self.assertContains(response, 'button.disabled = true')
+        self.assertContains(response, 'Uploading and parsing…')
 
     @patch("expense_upload.views.process_receipt")
     def test_valid_image_starts_receipt_processing(self, process_receipt_mock):

@@ -35,6 +35,11 @@
             padding: 0.75rem 1rem;
             width: 100%;
         }
+        button:disabled {
+            background: #8a929a;
+            cursor: not-allowed;
+            opacity: 0.75;
+        }
         .button-link {
             background: #1769aa;
             border-radius: 0.5rem;
@@ -84,12 +89,20 @@
                 {% endif %}
             </div>
         {% endif %}
-        <form method="post" enctype="multipart/form-data">
+        <form id="receipt-upload-form" method="post" enctype="multipart/form-data">
             {% csrf_token %}
             {{ form.as_p }}
-            <button type="submit">Upload and parse receipts</button>
+            <button id="receipt-upload-button" type="submit">Upload and parse receipts</button>
         </form>
     </section>
 </main>
+<script>
+    document.getElementById("receipt-upload-form").addEventListener("submit", function () {
+        const button = document.getElementById("receipt-upload-button");
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        button.textContent = "Uploading and parsing…";
+    });
+</script>
 </body>
 </html>
