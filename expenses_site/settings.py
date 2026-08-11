@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING
 SECRET_KEY = decouple.config("DJANGO_SECRET_KEY")
-DEBUG = decouple.config("DEBUG")
+DEBUG = decouple.config("DEBUG", cast=bool)
 SUPABASE_DB_PASSWORD = decouple.config("SUPABASE_DB_PASSWORD")
 SUPABASE_LINK = decouple.config("SUPABASE_LINK")
 REDIS_HOST = decouple.config("REDIS_HOST")
