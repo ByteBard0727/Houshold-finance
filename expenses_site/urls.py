@@ -22,7 +22,6 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('upload/', include("expense_upload.urls")),
     path('dashboard/', include("dashboard.urls")),
-    path('breakdown/', include("breakdown.urls")),
     path('expenses_webhook/', include("webhooks.urls")),
     path('admin/', admin.site.urls),
 ]
@@ -30,5 +29,4 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
 
