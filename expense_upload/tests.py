@@ -69,6 +69,10 @@ class ReceiptUploadTests(TestCase):
         self.assertContains(response, 'id="receipt-upload-button"')
         self.assertContains(response, 'button.disabled = true')
         self.assertContains(response, 'Uploading and parsing…')
+        self.assertContains(
+            response,
+            f'href="{reverse("dashboard")}">Back to dashboard</a>',
+        )
 
     @patch("expense_upload.views.process_receipt")
     def test_valid_image_starts_receipt_processing(self, process_receipt_mock):
