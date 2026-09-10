@@ -1,4 +1,5 @@
-from django.shortcuts import render
+from django.contrib import messages
+from django.shortcuts import redirect, render
 from expense_upload.models import Google_Sheets_Data
 from channels.layers import get_channel_layer
 import json
@@ -8,6 +9,9 @@ from django.http import JsonResponse
 from datetime import datetime
 from calendar import month_name
 from .consumers import DashboardConsumer
+from .monthly_sheets import MonthlySheetError, create_next_month_sheet
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_POST
 
 # Global variable for caching dashboard data
 global_dashboard_data = {}
@@ -202,6 +206,22 @@ def dashboard(request):
         'yearly_summary': yearly_summary,
         'available_years': get_available_years(),
     })
+
+
+@require_POST
+@csrf_protect
+def create_monthly_sheet(request):
+    """Create the next strict-format monthly ledger and refresh the projection."""
+    try:
+        result = create_next_month_sheet()
+    except MonthlySheetError as error:
+        messages.error(request, str(error))
+    else:
+        messages.success(
+            request,
+            f"Created {result['title']} from the validated {result['template']} template.",
+        )
+    return redirect("dashboard")
 
 
 def get_yearly_summary_data(request):

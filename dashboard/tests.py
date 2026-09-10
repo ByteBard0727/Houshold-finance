@@ -1,11 +1,14 @@
 import json
-from datetime import datetime
+from datetime import date, datetime
+from unittest.mock import patch
 
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 
 from expense_upload.models import Google_Sheets_Data
 
 from .views import (
+    create_monthly_sheet,
     get_month_stats,
     get_available_years,
     get_pk_unique,
@@ -14,6 +17,53 @@ from .views import (
     get_yearly_summary,
     get_yearly_summary_data,
 )
+from .monthly_sheets import MonthlySheetError, _next_month, _prepare_rows
+
+
+class MonthlySheetCreationTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_next_month_crosses_year_boundary(self):
+        self.assertEqual(_next_month(date(2026, 12, 1)), date(2027, 1, 1))
+
+    def test_prepare_rows_clears_transactions_and_keeps_formulas(self):
+        rows = []
+        for row_number in range(2, 34):
+            row = ["user", "name", 1, 10, 20, 30, 40, "detail", 50,
+                   "card detail", 60, "utility detail",
+                   f"=SUM(D{row_number}:L{row_number})", "Feb2026", row_number]
+            rows.append(row)
+        rows[-1][2] = "合計"
+        rows[-1][3] = "=SUM(D2:D32)"
+
+        prepared = _prepare_rows(rows, date(2027, 2, 1), 417, "Feb2027")
+
+        self.assertEqual(prepared[0][2], 46419)
+        self.assertEqual(prepared[27][2], 46446)
+        self.assertEqual(prepared[28][2], "")
+        self.assertEqual(prepared[0][3:12], [""] * 9)
+        self.assertEqual(prepared[0][12], "=SUM(D2:L2)")
+        self.assertEqual(prepared[-1][2], "合計")
+        self.assertEqual(prepared[-1][3], "=SUM(D2:D32)")
+        self.assertEqual([row[14] for row in prepared], list(range(417, 449)))
+
+    @patch("dashboard.views.create_next_month_sheet")
+    def test_create_endpoint_reports_success(self, create_sheet):
+        create_sheet.return_value = {"title": "Feb2027", "template": "Feb2026"}
+
+        response = self.client.post(reverse("create_monthly_sheet"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("dashboard"))
+
+    @patch("dashboard.views.create_next_month_sheet")
+    def test_create_endpoint_handles_validation_error(self, create_sheet):
+        create_sheet.side_effect = MonthlySheetError("invalid template")
+
+        response = self.client.post(reverse("create_monthly_sheet"))
+
+        self.assertEqual(response.status_code, 302)
 
 
 class DynamicMonthlyTotalTests(TestCase):

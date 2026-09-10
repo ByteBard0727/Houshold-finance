@@ -278,8 +278,23 @@
                             <a href="{% url 'upload_receipt' %}" class="btn btn-sm btn-primary">
                                 <i class="fas fa-camera fa-sm" aria-hidden="true"></i> Upload Receipt
                             </a>
+                            <form method="post" action="{% url 'create_monthly_sheet' %}" class="d-inline"
+                                  onsubmit="return confirm('Create the next monthly Google Sheet from the validated template?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-success">
+                                    <i class="fas fa-calendar-plus fa-sm" aria-hidden="true"></i> Create Next Month
+                                </button>
+                            </form>
                         </div>
                     </div>
+
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}" role="alert">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
 
                     <!-- Content Row -->
                     <div class="row">

@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('create-monthly-sheet/', views.create_monthly_sheet, name='create_monthly_sheet'),
     path('get_sheet_data/', views.get_sheet_data, name='get_sheet_data'),
     path('get_monthly_expenses/', views.get_monthly_expenses, name='get_monthly_expenses'),
     path('get_sheets/', views.get_sheets, name='get_sheets'),
