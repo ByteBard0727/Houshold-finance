@@ -102,6 +102,14 @@ After changing Apps Script:
 
 ## Receipt troubleshooting
 
+### Batch review and synchronization
+
+- Multi-image uploads keep their original order and open one editable confirmation form.
+- Failed extractions remain visible with their stored images and safe error messages; they are not silently dropped from the batch.
+- Receipt images are served through the receipt-specific `receipt_image` view with private, no-store caching. Do not expose the media directory through a general production route.
+- One confirmation stores all valid edits transactionally. The browser then sends each confirmed receipt separately with its original UUID, so a later failure does not lose the rest of the batch.
+- Before manually inserting a failed receipt, cross-check the authoritative Sheet and its UUID state to avoid a duplicate write.
+
 ### Upload says unsupported format
 
 - Confirm the error’s detected format.
@@ -115,7 +123,9 @@ After changing Apps Script:
 - Inspect receipt status and safe error text.
 - Verify Gemini configuration names exist without printing values.
 - Confirm the configured model remains available.
-- Avoid repeated synchronous retries during an external outage.
+- The provider makes the configured bounded number of attempts and searches returned text parts for valid JSON.
+- Distinguish timeout, request, and incomplete-response messages when diagnosing failures.
+- Avoid additional manual retry loops during an external outage.
 
 ### Sheet contains the receipt but Django says sync failed
 
@@ -130,6 +140,28 @@ After changing Apps Script:
 - Inspect Apps Script Executions for the deferred function.
 - The current webhook intentionally reads the configured workbook and may take time.
 - Dashboard endpoints are normally subsecond locally; slow UI during a refresh can be resource or network contention.
+
+### Supabase is unreachable from the phone
+
+The direct Supabase database endpoint currently relies on IPv6. The Honor 8 has intermittently reported `No route to host`, which can produce dashboard HTTP 500 responses even while Daphne is healthy.
+
+- Confirm local `/upload/` and `/dashboard/` responses before blaming Tailscale.
+- Test the database connection without printing its connection string or password.
+- Treat restarting Daphne as recovery, not a network fix.
+- The durable follow-up is to move the phone to Supabase's Session Pooler using the connection string copied from the project dashboard, then run Django checks and a projection read before making it permanent.
+
+## Creating the next monthly worksheet
+
+Use **Create Next Month** on the dashboard. The POST-only action:
+
+1. identifies the latest worksheet named like `Sep2026`;
+2. chooses the same month from the prior year as the preferred formatting template;
+3. validates the exact dashboard headers and 32-row ledger shape;
+4. copies formatting and formulas, clears transaction values, and writes the new dates;
+5. allocates continuous `PK_Unique` values above the maximum across all monthly tabs;
+6. verifies the result and deletes the copied tab if validation fails.
+
+Do not rename monthly worksheets or change the expected columns without updating and testing the dashboard schema contract.
 
 ## Webhook troubleshooting
 
@@ -165,6 +197,14 @@ If services disappear with the screen off:
 - confirm Huawei app-launch/background restrictions;
 - verify Termux:Boot scripts remain executable;
 - test private `/upload/` after 15 minutes and again after an hour.
+
+If the phone rebooted but the stack did not return, inspect whether Android marked Termux:Boot as stopped. Launching its activity once clears that stopped state; then verify the boot scripts and all standard health checks.
+
+### Root watchdog state
+
+The active recovery mechanism is the established root watchdog launched from Magisk `service.d`. It runs outside the Termux process group and performs bounded health checks before invoking the idempotent Termux launchers.
+
+An experimental guardian/worker split was rolled back on 2026-09-10 after concurrent startup paths spawned duplicate supervisors and made the phone unresponsive. Its script files may remain on the device, but the Magisk entry point must continue to reference the established watchdog. Do not activate the guardian/worker version until its locking, stale-PID handling, and concurrent-start lifecycle are reproduced and tested off-device.
 
 ## Backup and recovery
 

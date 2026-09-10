@@ -11,12 +11,14 @@ This project is intentionally not a greenfield rewrite. Its central engineering 
 - Displays monthly household-finance charts and category breakdowns.
 - Synchronizes monthly Google Sheets worksheets into PostgreSQL/Supabase.
 - Accepts one or multiple receipt photos from a mobile browser.
+- Reviews a whole upload batch in one editable form, including visible failed images.
 - Supports PNG, ordinary JPEG, and iPhone multi-picture JPEG/MPO uploads.
 - Sends images directly to Gemini for structured extraction.
 - Requires a user to review and edit store, date, amount, category, and items.
 - Writes only confirmed values to the appropriate daily Google Sheets row.
 - Prevents duplicate financial increments using receipt UUIDs and Apps Script Properties.
 - Refreshes the PostgreSQL projection asynchronously after a Sheet write.
+- Creates the next strict-format monthly worksheet from a validated prior template.
 - Keeps the application private to approved Tailscale users.
 - Publishes only the authenticated synchronization webhook to Google Apps Script.
 
@@ -115,6 +117,7 @@ REDIS_HOST
 GEMINI_API_KEY
 GEMINI_RECEIPT_MODEL
 GEMINI_RECEIPT_TIMEOUT
+GEMINI_RECEIPT_ATTEMPTS
 APPS_SCRIPT_RECEIPT_URL
 APPS_SCRIPT_RECEIPT_SHARED_SECRET
 APPS_SCRIPT_RECEIPT_TIMEOUT
@@ -146,11 +149,11 @@ The configured application database is Supabase. Tests that do not need the proj
 The test suite covers:
 
 - Upload validation, limits, multiple-image order, and iPhone MPO compatibility.
-- Gemini request configuration, structured-response normalization, and controlled failures.
-- Editable confirmation, state transitions, immutable extracted data, and post/redirect/get behavior.
+- Gemini request configuration, response-part parsing, bounded retries, and controlled failures.
+- Single and batch confirmation, secure receipt-image review, state transitions, and post/redirect/get behavior.
 - Apps Script provider payloads, acknowledgements, timeouts, retries, and already-synced protection.
 - Webhook fail-closed behavior for missing configuration, missing/incorrect secrets, invalid content type, and valid authentication.
-- Dashboard month and total-row behavior.
+- Dashboard month and total-row behavior, plus validated next-month worksheet preparation.
 
 External APIs are mocked in unit tests. Live verification was performed separately against the household Sheet, Supabase projection, Gemini, Tailscale routes, and the Android deployment.
 
@@ -177,10 +180,12 @@ Google Apps Script is deployed separately because it is bound to the private hou
 
 - HEIC/HEIF decoding is not included; iPhones should use “Most Compatible” JPEG mode. JPEG/MPO is supported.
 - Gemini extraction is synchronous and intended for low household volume.
+- Supabase's direct database endpoint depends on IPv6 from the Honor 8; migration to the session pooler remains planned.
 - The dashboard projection refresh reads the complete configured workbook and can take time.
 - Receipt-image retention cleanup is not automated yet.
 - Access control is provided by Tailscale rather than Django user accounts.
 - The legacy worksheet structure and `PK_Unique` conventions are preserved intentionally.
+- Android/EMUI can still reclaim Termux; a root watchdog recovers the stack, but its replacement supervisor needs isolated lifecycle testing before deployment.
 
 ## Why this project matters
 

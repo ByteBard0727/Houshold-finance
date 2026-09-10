@@ -206,11 +206,21 @@ The first recovery attempt exposed another weakness: an existing Magisk `service
 - binds Redis explicitly to `127.0.0.1` with a writable PID file;
 - uses a bounded local HTTP request instead of a potentially hanging Daphne process lookup.
 
-I tested the recovery path by gracefully stopping Redis. The supervisor detected the missing process, started a new Redis PID within one check interval, restored `PONG`, and kept the upload endpoint at HTTP 200. The same application-stack check covers Daphne: if Daphne disappears, the local upload health check fails and the launcher starts it again while Tailscale routing remains in place.
+I tested the recovery path by gracefully stopping Redis. The watchdog detected the missing process, started a new Redis PID within one check interval, restored `PONG`, and kept the upload endpoint at HTTP 200. The same application-stack check covers Daphne: if Daphne disappears, the local upload health check fails and the launcher starts it again while Tailscale routing remains in place.
 
 This design recognizes that root access does not turn Android into systemd. I cannot guarantee that EMUI will never kill Termux again, but I moved supervision outside EMUI’s Termux process boundary and reduced expected recovery time to roughly one minute.
 
-## 12. Outcomes
+In September 2026 I prototyped a guardian/worker split intended to make the supervisor itself easier to recover. Concurrent boot and manual startup paths exposed a lifecycle race: duplicate guardians and workers accumulated until the phone stopped responding. I rebooted the device, restored the established Magisk entry point, and verified Redis plus the local upload and dashboard endpoints. The failed experiment was useful evidence that a second supervisor layer is not automatically safer; its lock acquisition, PID ownership, and simultaneous-start behavior must be proven independently before another deployment.
+
+## 12. September 2026 receipt and ledger reliability
+
+Several real multi-image uploads exposed usability and recovery gaps. I changed batch review from a chain of per-receipt confirmations into one ordered, editable form. Failed extractions now remain visible beside the successful receipts, and production images are delivered through a receipt-specific private endpoint instead of depending on Django's development media serving.
+
+I also made Gemini failures more diagnosable and recoverable. Extraction now examines returned text parts for valid JSON, retries incomplete or transient responses a bounded number of times, and records whether the final problem was a timeout, request failure, or incomplete model response while retaining the source image.
+
+Finally, I automated the strict monthly ledger setup. The dashboard can copy the appropriate prior worksheet, validate its schema, clear transaction values while preserving formulas and formatting, allocate globally continuous `PK_Unique` values, and roll back a malformed copy. This removes a repetitive manual step without weakening the Sheet-as-authority contract.
+
+## 13. Outcomes
 
 I verified the finished workflow with real devices and services:
 
@@ -226,7 +236,7 @@ I verified the finished workflow with real devices and services:
 
 The most valuable result for me is not any single library. It is the disciplined preservation of invariants while I solved problems across application code, APIs, networking, databases, ARM Linux packaging, browser behavior, and Android operations.
 
-## 13. Sources and field references
+## 14. Sources and field references
 
 I used these sources as working references and verified device-specific claims against the live FRD-L09 wherever possible:
 
