@@ -144,6 +144,7 @@ RECEIPT_MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
 GEMINI_RECEIPT_MODEL = config("GEMINI_RECEIPT_MODEL", default="gemini-2.5-flash-lite")
 GEMINI_RECEIPT_TIMEOUT = config("GEMINI_RECEIPT_TIMEOUT", default=20, cast=float)
+GEMINI_RECEIPT_ATTEMPTS = config("GEMINI_RECEIPT_ATTEMPTS", default=2, cast=int)
 
 # Authenticated receipt writes to the bound Google Apps Script web app.
 APPS_SCRIPT_RECEIPT_URL = config("APPS_SCRIPT_RECEIPT_URL", default="")

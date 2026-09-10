@@ -83,3 +83,7 @@ class ReceiptConfirmationForm(forms.Form):
                 if item.strip()
             ],
         }
+
+
+class BatchReceiptConfirmationForm(ReceiptConfirmationForm):
+    receipt_id = forms.UUIDField(widget=forms.HiddenInput)

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Review receipt batch</title>
+    <style>
+        body { background: #f4f6f8; color: #20242a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; }
+        main { margin: 0 auto; max-width: 44rem; padding: 1.25rem 0.75rem 3rem; }
+        .card { background: white; border-radius: 0.75rem; box-shadow: 0 0.25rem 1rem rgba(0,0,0,.08); margin-bottom: 1rem; padding: 1rem; }
+        h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
+        h2 { font-size: 1.1rem; margin-top: 0; }
+        label { display: block; font-weight: 600; margin-bottom: .3rem; }
+        input, select, textarea { border: 1px solid #aeb6bf; border-radius: .4rem; box-sizing: border-box; font: inherit; min-height: 2.6rem; padding: .6rem; width: 100%; }
+        textarea { resize: vertical; }
+        .receipt-image { border-radius: .5rem; display: block; max-height: 20rem; object-fit: contain; width: 100%; }
+        button, .button-link { background: #1769aa; border: 0; border-radius: .5rem; box-sizing: border-box; color: white; cursor: pointer; display: block; font-size: 1rem; margin-top: 1rem; min-height: 3rem; padding: .85rem 1rem; text-align: center; text-decoration: none; width: 100%; }
+        button:disabled { background: #8b949e; cursor: not-allowed; }
+        .notice { background: #fff3e0; border-radius: .5rem; padding: .85rem; }
+        .success { background: #e8f5e9; border-radius: .5rem; padding: .85rem; }
+        .failure { background: #ffebee; border-radius: .5rem; padding: .85rem; }
+        .status { font-weight: 700; }
+        .errorlist { color: #b00020; padding-left: 1.25rem; }
+        .helptext { color: #5f6872; font-size: .9rem; }
+    </style>
+</head>
+<body>
+<main>
+    <section class="card">
+        <h1>Review receipt batch</h1>
+        <p>{{ parsed_count }} of {{ receipts|length }} receipt{{ receipts|length|pluralize }} parsed successfully.</p>
+        {% if batch_failed_count %}
+            <p class="notice" role="alert">{{ batch_failed_count }} additional upload{{ batch_failed_count|pluralize }} could not be parsed and remain stored.</p>
+        {% endif %}
+    </section>
+
+    {% if reviewing %}
+        <form id="batch-confirm-form" method="post">
+            {% csrf_token %}
+            {{ formset.management_form }}
+            {{ formset.non_form_errors }}
+            {% for form, receipt in review_rows %}
+                <section class="card">
+                    <h2>Receipt {{ forloop.counter }} of {{ formset.total_form_count }}</h2>
+                    <img class="receipt-image" src="{% url 'receipt_image' receipt.id %}" alt="Uploaded receipt {{ forloop.counter }}">
+                    {{ form.as_p }}
+                </section>
+            {% endfor %}
+            {% for receipt in receipts %}
+                {% if receipt.status == 'extraction_failed' %}
+                    <section class="card failure" role="alert">
+                        <h2>Could not parse this receipt</h2>
+                        <img class="receipt-image" src="{% url 'receipt_image' receipt.id %}" alt="Receipt that could not be parsed">
+                        <p>Reference: {{ receipt.id }}</p>
+                        <p>{{ receipt.error_message }}</p>
+                    </section>
+                {% endif %}
+            {% endfor %}
+            <button id="batch-confirm-button" type="submit">Confirm and send all receipts</button>
+        </form>
+    {% else %}
+        <section class="card">
+            <h2>Google Sheets progress</h2>
+            <p>Keep this page open. Each confirmed receipt is sent with its own duplicate-safe reference.</p>
+            {% for receipt in receipts %}
+                <p id="receipt-{{ receipt.id }}" class="{% if receipt.status == 'synced' %}success{% elif receipt.status == 'sync_failed' or receipt.status == 'extraction_failed' %}failure{% endif %}">
+                    <strong>{% if receipt.confirmed_json %}{{ receipt.confirmed_json.store_name|default:"Receipt" }}{% elif receipt.extracted_json %}{{ receipt.extracted_json.store_name|default:"Receipt" }}{% else %}Receipt{% endif %}</strong><br>
+                    {% if receipt.confirmed_json %}{{ receipt.confirmed_json.receipt_date }} · ¥{{ receipt.confirmed_json.total_amount }}{% endif %}<br>
+                    <span class="status">{{ receipt.get_status_display }}</span>
+                    {% if receipt.error_message %}<br>{{ receipt.error_message }}{% endif %}
+                </p>
+            {% endfor %}
+            <p id="batch-complete" class="success" {% if not completed %}hidden{% endif %}>Batch processing finished.</p>
+            <a class="button-link" href="{% url 'upload_receipt' %}">Upload more receipts</a>
+        </section>
+    {% endif %}
+</main>
+{% if reviewing %}
+<script>
+    document.getElementById("batch-confirm-form").addEventListener("submit", function () {
+        const button = document.getElementById("batch-confirm-button");
+        button.disabled = true;
+        button.textContent = "Confirming batch…";
+    });
+</script>
+{% elif sync_receipts %}
+<script>
+    const queue = [
+        {% for receipt in sync_receipts %}
+            { id: "{{ receipt.id }}", url: "{% url 'sync_receipt_batch_item' receipt.id %}" }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+    const csrfToken = "{{ csrf_token }}";
+
+    async function syncBatch() {
+        for (const receipt of queue) {
+            const row = document.getElementById("receipt-" + receipt.id);
+            const status = row.querySelector(".status");
+            status.textContent = "Sending to Google Sheets…";
+            try {
+                const response = await fetch(receipt.url, {
+                    method: "POST",
+                    headers: { "X-CSRFToken": csrfToken, "Accept": "application/json" },
+                    credentials: "same-origin"
+                });
+                const result = await response.json();
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || "Google Sheets did not acknowledge this receipt.");
+                }
+                row.className = "success";
+                status.textContent = "Synced";
+            } catch (error) {
+                row.className = "failure";
+                status.textContent = "Sync failed: " + error.message;
+            }
+        }
+        document.getElementById("batch-complete").hidden = false;
+    }
+    syncBatch();
+</script>
+{% endif %}
+</body>
+</html>

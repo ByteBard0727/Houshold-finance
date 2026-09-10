@@ -46,19 +46,39 @@ class GeminiReceiptProvider:
             },
         }
 
-        try:
-            response = requests.post(
-                self.endpoint.format(model=settings.GEMINI_RECEIPT_MODEL),
-                headers={"x-goog-api-key": api_key},
-                json=payload,
-                timeout=settings.GEMINI_RECEIPT_TIMEOUT,
-            )
-            response.raise_for_status()
-            body = response.json()
-            text = body["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text)
-        except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise ReceiptExtractionError("Gemini did not return usable receipt data.") from exc
+        attempts = max(1, settings.GEMINI_RECEIPT_ATTEMPTS)
+        last_error = None
+        for _ in range(attempts):
+            try:
+                response = requests.post(
+                    self.endpoint.format(model=settings.GEMINI_RECEIPT_MODEL),
+                    headers={"x-goog-api-key": api_key},
+                    json=payload,
+                    timeout=settings.GEMINI_RECEIPT_TIMEOUT,
+                )
+                response.raise_for_status()
+                body = response.json()
+                parts = body["candidates"][0]["content"]["parts"]
+                for part in parts:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        try:
+                            return json.loads(part["text"])
+                        except (TypeError, ValueError):
+                            continue
+                raise ValueError("No JSON text part was returned.")
+            except requests.Timeout as exc:
+                last_error = exc
+                failure = "Gemini receipt extraction timed out"
+            except requests.RequestException as exc:
+                last_error = exc
+                failure = "Gemini receipt extraction request failed"
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                last_error = exc
+                failure = "Gemini returned an incomplete receipt response"
+
+        raise ReceiptExtractionError(
+            f"{failure} after {attempts} attempts. The image remains stored for retry."
+        ) from last_error
 
     @staticmethod
     def _prompt():

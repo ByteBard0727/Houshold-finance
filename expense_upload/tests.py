@@ -146,13 +146,125 @@ class ReceiptUploadTests(TestCase):
         self.assertEqual(len(receipts), 2)
         self.assertRedirects(
             response,
-            reverse("confirm_receipt", args=[receipts[0].id]),
+            reverse("confirm_receipt_batch"),
         )
         self.assertEqual(
             self.client.session["receipt_review_queue"],
             [str(receipt.id) for receipt in receipts],
         )
         self.assertEqual(process_mock.call_count, 2)
+
+
+class ReceiptBatchConfirmationTests(TestCase):
+    extracted_data = {
+        "store_name": "西友",
+        "receipt_date": "2026-08-02",
+        "total_amount": 3240,
+        "category": "Food",
+        "items": ["牛乳"],
+    }
+
+    def setUp(self):
+        self.receipts = [
+            Receipt.objects.create(
+                image=f"receipts/test-{index}.png",
+                status=Receipt.Status.EXTRACTED,
+                extracted_json=self.extracted_data.copy(),
+            )
+            for index in range(2)
+        ]
+        session = self.client.session
+        session["receipt_review_queue"] = [
+            str(receipt.id) for receipt in self.receipts
+        ]
+        session["receipt_batch_receipts"] = [
+            str(receipt.id) for receipt in self.receipts
+        ]
+        session["receipt_batch_failed_count"] = 1
+        session.save()
+        self.url = reverse("confirm_receipt_batch")
+
+    def _form_data(self):
+        data = {
+            "form-TOTAL_FORMS": "2",
+            "form-INITIAL_FORMS": "0",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+        }
+        for index, receipt in enumerate(self.receipts):
+            data.update({
+                f"form-{index}-receipt_id": str(receipt.id),
+                f"form-{index}-store_name": f"Store {index + 1}",
+                f"form-{index}-receipt_date": "2026-08-03",
+                f"form-{index}-total_amount": str(100 + index),
+                f"form-{index}-category": "Food",
+                f"form-{index}-items": "Item",
+            })
+        return data
+
+    def test_batch_page_lists_every_receipt_and_failed_count(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Receipt 1 of 2")
+        self.assertContains(response, "Receipt 2 of 2")
+        self.assertContains(response, "1 additional upload")
+        self.assertContains(response, "Confirm and send all receipts")
+
+    def test_batch_page_shows_failed_receipt_instead_of_omitting_it(self):
+        failed = Receipt.objects.create(
+            image="receipts/failed.png",
+            status=Receipt.Status.EXTRACTION_FAILED,
+            error_message="Gemini returned invalid data.",
+        )
+        session = self.client.session
+        session["receipt_batch_receipts"].append(str(failed.id))
+        session["receipt_batch_failed_count"] = 1
+        session.save()
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "2 of 3 receipts parsed successfully")
+        self.assertContains(response, "Could not parse this receipt")
+        self.assertContains(response, str(failed.id))
+
+    def test_one_confirmation_saves_every_receipt(self):
+        response = self.client.post(self.url, self._form_data(), follow=True)
+
+        self.assertRedirects(response, self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Store 1")
+        for index, receipt in enumerate(self.receipts):
+            receipt.refresh_from_db()
+            self.assertEqual(receipt.status, Receipt.Status.CONFIRMED)
+            self.assertEqual(receipt.confirmed_json["store_name"], f"Store {index + 1}")
+
+    def test_batch_rejects_receipt_ids_outside_session_order(self):
+        data = self._form_data()
+        data["form-0-receipt_id"] = data["form-1-receipt_id"]
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(all(
+            receipt.status == Receipt.Status.EXTRACTED
+            for receipt in Receipt.objects.all()
+        ))
+
+    @patch("expense_upload.views.process_receipt_sync", return_value=True)
+    def test_batch_sync_endpoint_sends_only_session_receipt(self, sync_mock):
+        receipt = self.receipts[0]
+        receipt.status = Receipt.Status.CONFIRMED
+        receipt.confirmed_json = self.extracted_data.copy()
+        receipt.save(update_fields=["status", "confirmed_json"])
+
+        response = self.client.post(
+            reverse("sync_receipt_batch_item", args=[receipt.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        sync_mock.assert_called_once()
 
 
 class StubProvider:
@@ -197,6 +309,16 @@ class ReceiptExtractionTests(TestCase):
         self.assertEqual(self.receipt.extracted_json["store_name"], "西友")
         self.assertEqual(self.receipt.extracted_json["items"], ["牛乳", "卵"])
         self.assertEqual(provider.call[1], "image/png")
+
+    def test_receipt_image_endpoint_serves_stored_image_in_production_mode(self):
+        with override_settings(DEBUG=False):
+            response = self.client.get(
+                reverse("receipt_image", args=[self.receipt.id])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertEqual(response["Cache-Control"], "private, no-store")
 
     def test_provider_failure_is_recorded_without_raising(self):
         provider = StubProvider(error=ReceiptExtractionError("Gemini unavailable."))
@@ -553,3 +675,44 @@ class GeminiReceiptProviderTests(TestCase):
             "Gemini extraction is not configured.",
         ):
             GeminiReceiptProvider().extract(PNG_IMAGE, "image/png")
+
+    @override_settings(
+        GEMINI_API_KEY="test-key",
+        GEMINI_RECEIPT_MODEL="test-model",
+        GEMINI_RECEIPT_TIMEOUT=7,
+        GEMINI_RECEIPT_ATTEMPTS=2,
+    )
+    @patch("expense_upload.services.extraction.requests.post")
+    def test_provider_retries_an_incomplete_response(self, post_mock):
+        incomplete = Mock()
+        incomplete.json.return_value = {"candidates": []}
+        complete = Mock()
+        complete.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"total_amount": 2390}'}]}}]
+        }
+        post_mock.side_effect = [incomplete, complete]
+
+        result = GeminiReceiptProvider().extract(PNG_IMAGE, "image/png")
+
+        self.assertEqual(result, {"total_amount": 2390})
+        self.assertEqual(post_mock.call_count, 2)
+
+    @override_settings(
+        GEMINI_API_KEY="test-key",
+        GEMINI_RECEIPT_MODEL="test-model",
+        GEMINI_RECEIPT_TIMEOUT=7,
+        GEMINI_RECEIPT_ATTEMPTS=2,
+    )
+    @patch("expense_upload.services.extraction.requests.post")
+    def test_provider_records_specific_failure_after_retries(self, post_mock):
+        response = Mock()
+        response.json.return_value = {"candidates": []}
+        post_mock.return_value = response
+
+        with self.assertRaisesMessage(
+            ReceiptExtractionError,
+            "Gemini returned an incomplete receipt response after 2 attempts.",
+        ):
+            GeminiReceiptProvider().extract(PNG_IMAGE, "image/png")
+
+        self.assertEqual(post_mock.call_count, 2)
