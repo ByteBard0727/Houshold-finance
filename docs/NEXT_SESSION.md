@@ -1,26 +1,29 @@
 # Next Session Handoff
 
-Last updated: 2026-09-10 (Asia/Tokyo)
+Last updated: 2026-09-26 (Asia/Tokyo)
 
 This file is intentionally sanitized. Retrieve hostnames, credentials, workbook identifiers, and service connection strings from the existing private deployment configuration, never from Git history.
 
 ## Shipped this session
 
-- Multi-image uploads use one ordered batch confirmation page.
-- Failed receipt extractions remain visible with their stored images and error state.
-- Production receipt previews use a receipt-specific private endpoint.
-- Confirmed batch items synchronize independently with their original duplicate-safe UUIDs.
-- Gemini extraction performs bounded retries, examines all returned text parts, and records specific safe failure categories.
-- The dashboard can create the next monthly Google Sheet after validating the strict ledger schema, dates, formulas, and globally continuous primary keys.
-- The current changes were deployed to the Honor 8 and the local Redis, upload, and dashboard health checks passed after recovery.
+- Recovered the full Honor 8 stack after an unclean shutdown and hardened the Tailscale launcher against a protected stale socket.
+- Installed Termux:Widget and deployed `~/.shortcuts/Reset Household Finance`; the user still needs to place the registered Termux widget on the EMUI home screen.
+- Changed multi-image uploads to store the batch first and parse each receipt through its own session-authorized endpoint, preventing one long request from timing out.
+- Added an optional OpenAI Responses API vision fallback with strict structured output after Gemini failures. It is deployed but inactive until `OPENAI_API_KEY` is configured privately.
+- Migrated production from Supabase's IPv6-dependent direct endpoint to the verified IPv4 Session Pooler.
+- Reconciled and synchronized the latest ten receipts. Their total was added to the authoritative September worksheet, then the projection was refreshed.
+- Added isolated SQLite test settings. The complete 59-test suite passes.
+- Pushed the implementation to `origin/master` in commit `72f026c`.
 
 ## Current production state
 
 - Google Sheets remains the authoritative ledger; Supabase remains a rebuildable dashboard projection.
 - The established root watchdog is active through the Magisk `service.d` entry point.
 - The experimental guardian/worker split is inactive and was rolled back after a duplicate-process startup race. Do not enable it merely because its files may still exist on the phone.
-- Termux:Boot was observed with Android's stopped flag after a reboot. Opening its activity cleared the flag and allowed the service stack to recover.
-- The direct Supabase endpoint's IPv6 route from the Honor 8 remains intermittent and can surface as dashboard HTTP 500 errors.
+- Termux:Boot was observed with Android's stopped flag after an earlier reboot. Opening its activity cleared the flag and allowed the service stack to recover.
+- Production uses the Session Pooler values stored only in the phone's private `.env`; dashboard and upload both returned HTTP 200 afterward.
+- Termux:Widget 0.15.0 is installed and Android reports its widget provider. The recovery shortcut is valid, but no home-screen widget instance has been placed yet.
+- All ten receipts from the latest batch are `synced`. Two interrupted writes were reconciled against the Sheet before their local status was corrected; two genuinely absent writes used recorded recovery UUIDs after their original UUIDs remained conservatively `pending`.
 
 ## First checks next time
 
@@ -33,18 +36,18 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/upload/
 curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/dashboard/
 ```
 
-Use the isolated test settings described in the private troubleshooting skill when the normal settings would connect to Supabase. The full focused suite is:
+Use the tracked isolated settings so tests never touch the live projection:
 
 ```bash
-PYTHONPATH="/tmp:$PWD" DJANGO_SETTINGS_MODULE=household_batch_test_settings ../venv/bin/python manage.py test dashboard expense_upload
+../venv/bin/python manage.py test --settings=expenses_site.test_settings
 ```
 
 ## Prioritized follow-up
 
-1. Migrate the Honor 8 database connection from the IPv6-dependent direct Supabase endpoint to the Session Pooler. Obtain the exact connection string from the Supabase dashboard, preserve it only in private configuration, then verify Django checks, a dashboard projection read, and receipt synchronization.
-2. Redesign the guardian/worker experiment off-device. Tests must cover simultaneous starts, atomic singleton locking, stale PID reuse, child crashes, bounded commands, and cleanup before any phone deployment.
-3. Re-run a controlled multi-image receipt batch and verify image previews, one-click confirmation, individual sync statuses, Sheet values, and the refreshed dashboard projection.
-4. Confirm the bound Apps Script deployment is the intended current version before changing synchronization behavior; its source and deployment metadata are maintained outside this public repository.
+1. On the Honor 8 home screen, pinch inward, choose **Widgets**, add **Termux:Widget**, and select **Reset Household Finance**. The provider and shortcut are already installed and verified.
+2. If an OpenAI API fallback is wanted, add `OPENAI_API_KEY` only to the phone's private `.env`, restart Daphne, and perform a controlled failed-Gemini test. Do not commit the key.
+3. Improve Apps Script `pending` reconciliation tooling. The current safe procedure still requires comparing the authoritative Sheet before resolving an interrupted UUID.
+4. Redesign the guardian/worker experiment off-device. Do not activate the retained experimental files on the phone.
 
 ## Non-negotiable safety rules
 
@@ -52,3 +55,4 @@ PYTHONPATH="/tmp:$PWD" DJANGO_SETTINGS_MODULE=household_batch_test_settings ../v
 - Never expose the dashboard, upload route, or receipt images through Funnel.
 - Never commit `.env`, service-account files, phone addresses, receipt media, Sheet data, or shared secrets.
 - Preserve unrelated phone and workbook state during deployment; use fast-forward pulls and inspect migrations before applying them.
+- Rent and other non-receipt entries remain manual-only and must not be generated by receipt automation.

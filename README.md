@@ -13,7 +13,7 @@ This project is intentionally not a greenfield rewrite. Its central engineering 
 - Accepts one or multiple receipt photos from a mobile browser.
 - Reviews a whole upload batch in one editable form, including visible failed images.
 - Supports PNG, ordinary JPEG, and iPhone multi-picture JPEG/MPO uploads.
-- Sends images directly to Gemini for structured extraction.
+- Sends images to Gemini for structured extraction, with an optional OpenAI vision fallback.
 - Requires a user to review and edit store, date, amount, category, and items.
 - Writes only confirmed values to the appropriate daily Google Sheets row.
 - Prevents duplicate financial increments using receipt UUIDs and Apps Script Properties.
@@ -184,8 +184,9 @@ Google Apps Script is deployed separately because it is bound to the private hou
 ## Current limitations
 
 - HEIC/HEIF decoding is not included; iPhones should use “Most Compatible” JPEG mode. JPEG/MPO is supported.
-- Gemini extraction is synchronous and intended for low household volume.
-- Supabase's direct database endpoint depends on IPv6 from the Honor 8; migration to the session pooler remains planned.
+- Each image in a multi-receipt batch is parsed through its own browser request to avoid one long upload timeout.
+- The Honor 8 uses Supabase's IPv4-proxied Session Pooler because its direct endpoint requires unreliable IPv6 connectivity.
+- The OpenAI extraction fallback requires a separately configured API key; Gemini remains the primary provider.
 - The dashboard projection refresh reads the complete configured workbook and can take time.
 - Receipt-image retention cleanup is not automated yet.
 - Access control is provided by Tailscale rather than Django user accounts.
