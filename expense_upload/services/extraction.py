@@ -114,6 +114,116 @@ class GeminiReceiptProvider:
         }
 
 
+class OpenAIReceiptProvider:
+    """Fallback receipt extraction through the OpenAI Responses API."""
+
+    endpoint = "https://api.openai.com/v1/responses"
+
+    def extract(self, image_bytes, mime_type):
+        api_key = settings.OPENAI_API_KEY
+        if not api_key:
+            raise ReceiptExtractionError("OpenAI fallback extraction is not configured.")
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "store_name": {"type": "string"},
+                "receipt_date": {"type": "string"},
+                "total_amount": {"type": "integer"},
+                "category": {
+                    "type": "string",
+                    "enum": sorted(SUPPORTED_CATEGORIES),
+                },
+                "items": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": [
+                "store_name",
+                "receipt_date",
+                "total_amount",
+                "category",
+                "items",
+            ],
+            "additionalProperties": False,
+        }
+        payload = {
+            "model": settings.OPENAI_RECEIPT_MODEL,
+            "store": False,
+            "input": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": GeminiReceiptProvider._prompt()},
+                    {
+                        "type": "input_image",
+                        "image_url": (
+                            f"data:{mime_type};base64,"
+                            f"{base64.b64encode(image_bytes).decode('ascii')}"
+                        ),
+                        "detail": "high",
+                    },
+                ],
+            }],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "receipt_extraction",
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+        }
+
+        try:
+            response = requests.post(
+                self.endpoint,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=settings.OPENAI_RECEIPT_TIMEOUT,
+            )
+            response.raise_for_status()
+            body = response.json()
+            for output in body.get("output", []):
+                for content in output.get("content", []):
+                    if content.get("type") == "output_text":
+                        return json.loads(content["text"])
+            raise ValueError("No structured output was returned.")
+        except requests.Timeout as exc:
+            raise ReceiptExtractionError(
+                "OpenAI fallback receipt extraction timed out."
+            ) from exc
+        except requests.RequestException as exc:
+            raise ReceiptExtractionError(
+                "OpenAI fallback receipt extraction request failed."
+            ) from exc
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ReceiptExtractionError(
+                "OpenAI fallback returned an incomplete receipt response."
+            ) from exc
+
+
+class AutomaticReceiptProvider:
+    """Use Gemini first and OpenAI automatically when Gemini fails."""
+
+    def extract(self, image_bytes, mime_type):
+        try:
+            return normalize_extraction(
+                GeminiReceiptProvider().extract(image_bytes, mime_type)
+            )
+        except ReceiptExtractionError as gemini_error:
+            if not settings.OPENAI_API_KEY:
+                raise gemini_error
+            try:
+                return normalize_extraction(
+                    OpenAIReceiptProvider().extract(image_bytes, mime_type)
+                )
+            except ReceiptExtractionError as openai_error:
+                raise ReceiptExtractionError(
+                    f"Gemini failed; {openai_error} The image remains stored for retry."
+                ) from openai_error
+
+
 def normalize_extraction(data):
     """Validate required financial fields and normalize safe fallbacks."""
     if not isinstance(data, dict):
@@ -152,7 +262,7 @@ def process_receipt(receipt, provider=None):
     receipt.status = Receipt.Status.PROCESSING
     receipt.error_message = ""
     receipt.save(update_fields=["status", "error_message", "updated_at"])
-    provider = provider or GeminiReceiptProvider()
+    provider = provider or AutomaticReceiptProvider()
 
     try:
         with receipt.image.open("rb") as image_file:

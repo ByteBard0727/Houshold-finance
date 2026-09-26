@@ -6,6 +6,11 @@ urlpatterns = [
     path("image/<uuid:receipt_id>/", views.receipt_image, name="receipt_image"),
     path("batch/confirm/", views.confirm_receipt_batch, name="confirm_receipt_batch"),
     path(
+        "batch/<uuid:receipt_id>/parse/",
+        views.parse_receipt_batch_item,
+        name="parse_receipt_batch_item",
+    ),
+    path(
         "batch/<uuid:receipt_id>/sync/",
         views.sync_receipt_batch_item,
         name="sync_receipt_batch_item",

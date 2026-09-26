@@ -1,0 +1,83 @@
+#!/data/data/com.termux/files/usr/bin/sh
+
+# Full, idempotent reset for the Honor 8 household-finance runtime.
+# This file is intended to be launched from Termux:Widget.
+
+TERMUX_HOME=/data/data/com.termux/files/home
+TERMUX_PREFIX=/data/data/com.termux/files/usr
+TAILSCALE_SOCKET="$TERMUX_PREFIX/var/run/tailscale/tailscaled.sock"
+TAILSCALE_LAUNCHER="$TERMUX_HOME/.termux/boot/10-start-tailscale"
+APP_LAUNCHER="$TERMUX_HOME/.termux/boot/20-start-household-finance"
+RESET_LOCK="$TERMUX_HOME/.cache/household-finance-reset.lock"
+LOG_DIR="$TERMUX_HOME/projects/household-finance-current/logs"
+RESET_LOG="$LOG_DIR/manual-reset.log"
+
+mkdir -p "$TERMUX_HOME/.cache" "$LOG_DIR"
+if ! mkdir "$RESET_LOCK" 2>/dev/null; then
+  printf '%s\n' "A household-finance reset is already running."
+  exit 0
+fi
+trap 'rmdir "$RESET_LOCK" 2>/dev/null' EXIT HUP INT TERM
+
+log_message() {
+  printf '%s\n' "$1" | tee -a "$RESET_LOG"
+}
+
+log_message ""
+log_message "$(date '+%Y-%m-%d %H:%M:%S') reset requested"
+"$TERMUX_PREFIX/bin/termux-wake-lock" || true
+
+# Stop Daphne by its deployment-specific command line only.
+DAPHNE_PIDS=$(pgrep -f "$TERMUX_HOME/projects/household-finance-current/venv/bin/daphne -b 127.0.0.1 -p 8000" || true)
+if [ -n "$DAPHNE_PIDS" ]; then
+  kill $DAPHNE_PIDS 2>/dev/null || true
+fi
+
+# Redis is only the ephemeral Channels layer, so it needs no persisted shutdown.
+"$TERMUX_PREFIX/bin/redis-cli" shutdown nosave 2>/dev/null || true
+
+TAILSCALED_PIDS=$(pgrep -f "$TERMUX_PREFIX/bin/tailscaled.*--socket=$TAILSCALE_SOCKET" || true)
+if [ -n "$TAILSCALED_PIDS" ]; then
+  kill $TAILSCALED_PIDS 2>/dev/null || true
+fi
+
+WAIT_COUNT=0
+while [ "$WAIT_COUNT" -lt 10 ] && {
+  pgrep -f "$TERMUX_HOME/projects/household-finance-current/venv/bin/daphne -b 127.0.0.1 -p 8000" >/dev/null 2>&1 ||
+  pgrep -f "$TERMUX_PREFIX/bin/tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1;
+}; do
+  sleep 1
+  WAIT_COUNT=$((WAIT_COUNT + 1))
+done
+
+# Android/SELinux can leave this user-owned socket removable only through su.
+if [ -S "$TAILSCALE_SOCKET" ] && ! "$TERMUX_PREFIX/bin/tailscale" --socket="$TAILSCALE_SOCKET" status >/dev/null 2>&1; then
+  su -c "rm -f $TAILSCALE_SOCKET"
+fi
+
+sh "$TAILSCALE_LAUNCHER"
+
+WAIT_COUNT=0
+until "$TERMUX_PREFIX/bin/tailscale" --socket="$TAILSCALE_SOCKET" status >/dev/null 2>&1; do
+  WAIT_COUNT=$((WAIT_COUNT + 1))
+  if [ "$WAIT_COUNT" -ge 20 ]; then
+    log_message "FAILED: Tailscale did not become ready."
+    exit 1
+  fi
+  sleep 1
+done
+
+sh "$APP_LAUNCHER"
+
+WAIT_COUNT=0
+until "$TERMUX_PREFIX/bin/redis-cli" ping 2>/dev/null | grep -q '^PONG$' &&
+  "$TERMUX_PREFIX/bin/curl" -fsS --max-time 5 http://127.0.0.1:8000/upload/ >/dev/null 2>&1; do
+  WAIT_COUNT=$((WAIT_COUNT + 1))
+  if [ "$WAIT_COUNT" -ge 30 ]; then
+    log_message "FAILED: Redis or Django did not become ready."
+    exit 1
+  fi
+  sleep 1
+done
+
+log_message "SUCCESS: Tailscale, Redis, and Django are ready."

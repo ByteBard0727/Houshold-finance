@@ -14,6 +14,8 @@ SECRET_KEY = decouple.config("DJANGO_SECRET_KEY")
 DEBUG = decouple.config("DEBUG", cast=bool)
 SUPABASE_DB_PASSWORD = decouple.config("SUPABASE_DB_PASSWORD")
 SUPABASE_LINK = decouple.config("SUPABASE_LINK")
+SUPABASE_DB_USER = decouple.config("SUPABASE_DB_USER", default="postgres")
+SUPABASE_DB_PORT = decouple.config("SUPABASE_DB_PORT", default=5432, cast=int)
 REDIS_HOST = decouple.config("REDIS_HOST")
 DJANGO_SECRET_KEY = decouple.config("DJANGO_SECRET_KEY")
 ALLOWED_HOSTS = decouple.config("DJANGO_ALLOWED_HOSTS").split(",")
@@ -98,10 +100,10 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": "postgres",
-        "USER": "postgres",
+        "USER": SUPABASE_DB_USER,
         "PASSWORD": decouple.config("SUPABASE_DB_PASSWORD"),
         "HOST": decouple.config("SUPABASE_LINK"),
-        "PORT": "5432",
+        "PORT": SUPABASE_DB_PORT,
     }
 }
 
@@ -145,6 +147,12 @@ GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
 GEMINI_RECEIPT_MODEL = config("GEMINI_RECEIPT_MODEL", default="gemini-2.5-flash-lite")
 GEMINI_RECEIPT_TIMEOUT = config("GEMINI_RECEIPT_TIMEOUT", default=20, cast=float)
 GEMINI_RECEIPT_ATTEMPTS = config("GEMINI_RECEIPT_ATTEMPTS", default=2, cast=int)
+
+# Optional OpenAI vision fallback. Failed Gemini parses are sent here
+# automatically when an API key is configured.
+OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+OPENAI_RECEIPT_MODEL = config("OPENAI_RECEIPT_MODEL", default="gpt-5-mini")
+OPENAI_RECEIPT_TIMEOUT = config("OPENAI_RECEIPT_TIMEOUT", default=30, cast=float)
 
 # Authenticated receipt writes to the bound Google Apps Script web app.
 APPS_SCRIPT_RECEIPT_URL = config("APPS_SCRIPT_RECEIPT_URL", default="")

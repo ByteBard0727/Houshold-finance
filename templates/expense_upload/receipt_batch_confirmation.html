@@ -34,7 +34,19 @@
         {% endif %}
     </section>
 
-    {% if reviewing %}
+    {% if parse_receipts %}
+        <section class="card">
+            <h2>Parsing receipts</h2>
+            <p>Keep this page open. Each image is parsed in its own request so a large batch cannot time out as one long upload.</p>
+            {% for receipt in receipts %}
+                <p id="parse-{{ receipt.id }}" class="{% if receipt.status == 'extracted' %}success{% elif receipt.status == 'extraction_failed' %}failure{% endif %}">
+                    <strong>Receipt {{ forloop.counter }}</strong><br>
+                    <span class="status">{{ receipt.get_status_display }}</span>
+                </p>
+            {% endfor %}
+            <p id="parse-summary" class="notice" hidden></p>
+        </section>
+    {% elif reviewing %}
         <form id="batch-confirm-form" method="post">
             {% csrf_token %}
             {{ formset.management_form }}
@@ -75,7 +87,50 @@
         </section>
     {% endif %}
 </main>
-{% if reviewing %}
+{% if parse_receipts %}
+<script>
+    const parseQueue = [
+        {% for receipt in parse_receipts %}
+            { id: "{{ receipt.id }}", url: "{% url 'parse_receipt_batch_item' receipt.id %}" }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+    const csrfToken = "{{ csrf_token }}";
+
+    async function parseBatch() {
+        let failures = 0;
+        for (const receipt of parseQueue) {
+            const row = document.getElementById("parse-" + receipt.id);
+            const status = row.querySelector(".status");
+            status.textContent = "Parsing…";
+            try {
+                const response = await fetch(receipt.url, {
+                    method: "POST",
+                    headers: { "X-CSRFToken": csrfToken, "Accept": "application/json" },
+                    credentials: "same-origin"
+                });
+                const result = await response.json();
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || "Receipt parsing failed.");
+                }
+                row.className = "success";
+                status.textContent = "Parsed";
+            } catch (error) {
+                failures += 1;
+                row.className = "failure";
+                status.textContent = "Parse failed: " + error.message;
+            }
+        }
+        if (failures === 0) {
+            window.location.reload();
+        } else {
+            const summary = document.getElementById("parse-summary");
+            summary.hidden = false;
+            summary.textContent = failures + " receipt(s) remain stored. Refresh to retry them.";
+        }
+    }
+    parseBatch();
+</script>
+{% elif reviewing %}
 <script>
     document.getElementById("batch-confirm-form").addEventListener("submit", function () {
         const button = document.getElementById("batch-confirm-button");

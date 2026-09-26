@@ -89,9 +89,19 @@ def upload_receipt(request):
         if form.is_valid():
             for image in form.cleaned_data["images"]:
                 current_receipt = Receipt.objects.create(image=image)
-                process_receipt(current_receipt)
-                current_receipt.refresh_from_db()
                 receipts.append(current_receipt)
+
+            # A batch is parsed through one request per image from the review
+            # page. This keeps a large batch out of one proxy-sensitive request.
+            if len(receipts) > 1:
+                receipt_ids = [str(current_receipt.id) for current_receipt in receipts]
+                request.session[REVIEW_QUEUE_SESSION_KEY] = receipt_ids
+                request.session[BATCH_RECEIPTS_SESSION_KEY] = receipt_ids
+                request.session[FAILED_BATCH_SESSION_KEY] = 0
+                return redirect(reverse("confirm_receipt_batch"))
+
+            process_receipt(receipts[0])
+            receipts[0].refresh_from_db()
 
             review_queue = [
                 str(current_receipt.id)
@@ -103,9 +113,6 @@ def upload_receipt(request):
                 str(current_receipt.id) for current_receipt in receipts
             ]
             request.session[FAILED_BATCH_SESSION_KEY] = len(receipts) - len(review_queue)
-
-            if len(receipts) > 1 and review_queue:
-                return redirect(reverse("confirm_receipt_batch"))
 
             receipt = receipts[0]
             form = ReceiptUploadForm()
@@ -129,6 +136,14 @@ def confirm_receipt_batch(request):
         receipt
         for receipt in receipts
         if receipt.status == Receipt.Status.EXTRACTED and receipt.extracted_json
+    ]
+    parse_receipts = [
+        receipt
+        for receipt in receipts
+        if receipt.status in {
+            Receipt.Status.UPLOADED,
+            Receipt.Status.EXTRACTION_FAILED,
+        }
     ]
     if request.method == "POST":
         formset = BatchReceiptConfirmationFormSet(request.POST)
@@ -175,16 +190,55 @@ def confirm_receipt_batch(request):
             "review_rows": zip(formset, extracted_receipts),
             "receipts": receipts,
             "sync_receipts": sync_receipts,
+            "parse_receipts": parse_receipts,
             "parsed_count": sum(
-                receipt.status != Receipt.Status.EXTRACTION_FAILED
+                receipt.status in {
+                    Receipt.Status.EXTRACTED,
+                    Receipt.Status.CONFIRMED,
+                    Receipt.Status.SYNCED,
+                    Receipt.Status.SYNC_FAILED,
+                }
                 for receipt in receipts
             ),
-            "reviewing": any(
+            "reviewing": not parse_receipts and any(
                 receipt.status == Receipt.Status.EXTRACTED for receipt in receipts
             ),
             "completed": completed,
-            "batch_failed_count": request.session.get(FAILED_BATCH_SESSION_KEY, 0),
+            "batch_failed_count": sum(
+                receipt.status == Receipt.Status.EXTRACTION_FAILED
+                for receipt in receipts
+            ),
         },
+    )
+
+
+@require_http_methods(["POST"])
+def parse_receipt_batch_item(request, receipt_id):
+    queue = request.session.get(BATCH_RECEIPTS_SESSION_KEY, [])
+    if str(receipt_id) not in queue:
+        raise Http404("Receipt is not part of this upload batch.")
+
+    receipt = get_object_or_404(Receipt, id=receipt_id)
+    if receipt.status == Receipt.Status.EXTRACTED:
+        return JsonResponse({"ok": True, "status": receipt.status})
+    if receipt.status not in {
+        Receipt.Status.UPLOADED,
+        Receipt.Status.EXTRACTION_FAILED,
+    }:
+        return JsonResponse(
+            {"ok": False, "status": receipt.status, "error": receipt.error_message},
+            status=409,
+        )
+
+    succeeded = process_receipt(receipt)
+    receipt.refresh_from_db()
+    return JsonResponse(
+        {
+            "ok": succeeded,
+            "status": receipt.status,
+            "error": receipt.error_message,
+        },
+        status=200 if succeeded else 502,
     )
 
 

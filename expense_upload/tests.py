@@ -11,8 +11,10 @@ from django.urls import reverse
 from .forms import ReceiptUploadForm
 from .models import Receipt
 from .services.extraction import (
+    AutomaticReceiptProvider,
     ReceiptExtractionError,
     GeminiReceiptProvider,
+    OpenAIReceiptProvider,
     normalize_extraction,
     process_receipt,
 )
@@ -122,18 +124,6 @@ class ReceiptUploadTests(TestCase):
 
     @patch("expense_upload.views.process_receipt")
     def test_multiple_images_start_review_queue_in_upload_order(self, process_mock):
-        def mark_extracted(receipt):
-            receipt.status = Receipt.Status.EXTRACTED
-            receipt.extracted_json = {
-                "store_name": "店",
-                "receipt_date": "2026-08-07",
-                "total_amount": 100,
-                "category": "Stuff",
-                "items": [],
-            }
-            receipt.save(update_fields=["status", "extracted_json"])
-
-        process_mock.side_effect = mark_extracted
         first = SimpleUploadedFile("first.png", PNG_IMAGE, content_type="image/png")
         second = SimpleUploadedFile("second.png", PNG_IMAGE, content_type="image/png")
 
@@ -152,7 +142,10 @@ class ReceiptUploadTests(TestCase):
             self.client.session["receipt_review_queue"],
             [str(receipt.id) for receipt in receipts],
         )
-        self.assertEqual(process_mock.call_count, 2)
+        self.assertTrue(all(
+            receipt.status == Receipt.Status.UPLOADED for receipt in receipts
+        ))
+        process_mock.assert_not_called()
 
 
 class ReceiptBatchConfirmationTests(TestCase):
@@ -202,13 +195,13 @@ class ReceiptBatchConfirmationTests(TestCase):
             })
         return data
 
-    def test_batch_page_lists_every_receipt_and_failed_count(self):
+    def test_batch_page_lists_every_extracted_receipt(self):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Receipt 1 of 2")
         self.assertContains(response, "Receipt 2 of 2")
-        self.assertContains(response, "1 additional upload")
+        self.assertContains(response, "2 of 2 receipts parsed successfully")
         self.assertContains(response, "Confirm and send all receipts")
 
     def test_batch_page_shows_failed_receipt_instead_of_omitting_it(self):
@@ -225,8 +218,31 @@ class ReceiptBatchConfirmationTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertContains(response, "2 of 3 receipts parsed successfully")
-        self.assertContains(response, "Could not parse this receipt")
+        self.assertContains(response, "Parsing receipts")
         self.assertContains(response, str(failed.id))
+
+    @patch("expense_upload.views.process_receipt", return_value=True)
+    def test_batch_parse_endpoint_retries_only_session_receipt(self, process_mock):
+        receipt = self.receipts[0]
+        receipt.status = Receipt.Status.EXTRACTION_FAILED
+        receipt.save(update_fields=["status"])
+
+        response = self.client.post(
+            reverse("parse_receipt_batch_item", args=[receipt.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        process_mock.assert_called_once_with(receipt)
+
+    def test_batch_parse_endpoint_rejects_receipt_outside_session(self):
+        outside = Receipt.objects.create(image="receipts/outside.png")
+
+        response = self.client.post(
+            reverse("parse_receipt_batch_item", args=[outside.id])
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_one_confirmation_saves_every_receipt(self):
         response = self.client.post(self.url, self._form_data(), follow=True)
@@ -696,6 +712,74 @@ class GeminiReceiptProviderTests(TestCase):
 
         self.assertEqual(result, {"total_amount": 2390})
         self.assertEqual(post_mock.call_count, 2)
+
+
+class OpenAIReceiptProviderTests(TestCase):
+    @override_settings(
+        OPENAI_API_KEY="test-openai-key",
+        OPENAI_RECEIPT_MODEL="gpt-test",
+        OPENAI_RECEIPT_TIMEOUT=11,
+    )
+    @patch("expense_upload.services.extraction.requests.post")
+    def test_provider_sends_image_and_parses_structured_output(self, post_mock):
+        response = Mock()
+        response.json.return_value = {
+            "output": [{
+                "content": [{
+                    "type": "output_text",
+                    "text": '{"store_name":"ライフ","receipt_date":"2026-09-12","total_amount":903,"category":"Food","items":["卵"]}',
+                }]
+            }]
+        }
+        post_mock.return_value = response
+
+        result = OpenAIReceiptProvider().extract(PNG_IMAGE, "image/png")
+
+        self.assertEqual(result["total_amount"], 903)
+        call = post_mock.call_args
+        self.assertEqual(call.kwargs["timeout"], 11)
+        self.assertEqual(call.kwargs["json"]["model"], "gpt-test")
+        self.assertTrue(
+            call.kwargs["json"]["input"][0]["content"][1]["image_url"].startswith(
+                "data:image/png;base64,"
+            )
+        )
+        self.assertEqual(
+            call.kwargs["json"]["text"]["format"]["type"],
+            "json_schema",
+        )
+
+    @override_settings(OPENAI_API_KEY="")
+    def test_provider_requires_configuration(self):
+        with self.assertRaisesMessage(
+            ReceiptExtractionError,
+            "OpenAI fallback extraction is not configured.",
+        ):
+            OpenAIReceiptProvider().extract(PNG_IMAGE, "image/png")
+
+    @override_settings(OPENAI_API_KEY="test-openai-key")
+    @patch.object(OpenAIReceiptProvider, "extract", return_value={
+        "store_name": "fallback",
+        "receipt_date": "2026-09-12",
+        "total_amount": 903,
+        "category": "Food",
+        "items": ["卵"],
+    })
+    @patch.object(
+        GeminiReceiptProvider,
+        "extract",
+        side_effect=ReceiptExtractionError("Gemini unavailable."),
+    )
+    def test_automatic_provider_uses_openai_after_gemini_failure(
+        self,
+        gemini_extract,
+        openai_extract,
+    ):
+        result = AutomaticReceiptProvider().extract(PNG_IMAGE, "image/png")
+
+        self.assertEqual(result["store_name"], "fallback")
+        gemini_extract.assert_called_once()
+        openai_extract.assert_called_once()
 
     @override_settings(
         GEMINI_API_KEY="test-key",

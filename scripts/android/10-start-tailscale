@@ -1,0 +1,50 @@
+#!/data/data/com.termux/files/usr/bin/sh
+
+TERMUX_HOME=/data/data/com.termux/files/home
+TERMUX_PREFIX=/data/data/com.termux/files/usr
+TAILSCALE_STATE_DIR="$TERMUX_HOME/.local/state/tailscale"
+TAILSCALE_SOCKET="$TERMUX_PREFIX/var/run/tailscale/tailscaled.sock"
+DNSMASQ_PID="$TAILSCALE_STATE_DIR/dnsmasq-5353.pid"
+DNSMASQ_LOG="$TAILSCALE_STATE_DIR/dnsmasq-5353.log"
+
+"$TERMUX_PREFIX/bin/termux-wake-lock"
+
+mkdir -p "$TAILSCALE_STATE_DIR"
+mkdir -p "$TERMUX_PREFIX/var/run/tailscale"
+
+if ! test -s "$DNSMASQ_PID" || ! kill -0 "$(cat "$DNSMASQ_PID")" 2>/dev/null; then
+  setsid -f "$TERMUX_PREFIX/bin/dnsmasq" \
+    --no-daemon \
+    --no-resolv \
+    --filter-AAAA \
+    --server=8.8.8.8 \
+    --server=8.8.4.4 \
+    --port=5353 \
+    --listen-address=::1 \
+    --bind-interfaces \
+    --pid-file="$DNSMASQ_PID" \
+    --log-facility="$DNSMASQ_LOG" \
+    </dev/null >/dev/null 2>&1
+fi
+
+if ! su -c 'ip6tables -t nat -S OUTPUT' | grep -q -- '-p udp.*--dport 53.*--to-ports 5353'; then
+  su -c 'ip6tables -t nat -A OUTPUT -d ::1 -p udp --dport 53 -j REDIRECT --to-ports 5353'
+fi
+
+if ! su -c 'ip6tables -t nat -S OUTPUT' | grep -q -- '-p tcp.*--dport 53.*--to-ports 5353'; then
+  su -c 'ip6tables -t nat -A OUTPUT -d ::1 -p tcp --dport 53 -j REDIRECT --to-ports 5353'
+fi
+
+if ! pgrep -f "$TERMUX_PREFIX/bin/tailscaled.*$TAILSCALE_SOCKET" >/dev/null 2>&1; then
+  # An unclean Android shutdown can leave a protected, non-listening socket.
+  if [ -S "$TAILSCALE_SOCKET" ] && ! "$TERMUX_PREFIX/bin/tailscale" --socket="$TAILSCALE_SOCKET" status >/dev/null 2>&1; then
+    su -c "rm -f $TAILSCALE_SOCKET"
+  fi
+
+  SSL_CERT_FILE="$TERMUX_PREFIX/etc/tls/cert.pem" \
+  nohup "$TERMUX_PREFIX/bin/tailscaled" \
+    --tun=userspace-networking \
+    --state="$TAILSCALE_STATE_DIR/tailscaled.state" \
+    --socket="$TAILSCALE_SOCKET" \
+    >> "$TAILSCALE_STATE_DIR/tailscaled.log" 2>&1 &
+fi

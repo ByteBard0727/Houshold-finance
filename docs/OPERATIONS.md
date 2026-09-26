@@ -143,12 +143,12 @@ After changing Apps Script:
 
 ### Supabase is unreachable from the phone
 
-The direct Supabase database endpoint currently relies on IPv6. The Honor 8 has intermittently reported `No route to host`, which can produce dashboard HTTP 500 responses even while Daphne is healthy.
+The direct Supabase database endpoint relies on IPv6. The Honor 8 has reported `No route to host`, which can produce dashboard HTTP 500 responses even while Daphne is healthy. Production therefore uses Supabase's IPv4-proxied Session Pooler, with its pooler-specific host and `postgres.<project-ref>` username stored only in the phone's private `.env`.
 
 - Confirm local `/upload/` and `/dashboard/` responses before blaming Tailscale.
 - Test the database connection without printing its connection string or password.
 - Treat restarting Daphne as recovery, not a network fix.
-- The durable follow-up is to move the phone to Supabase's Session Pooler using the connection string copied from the project dashboard, then run Django checks and a projection read before making it permanent.
+- If this recurs, confirm `SUPABASE_LINK`, `SUPABASE_DB_USER`, and `SUPABASE_DB_PORT` still match the Session Pooler values in Supabase's Connect panel, without printing the password.
 
 ## Creating the next monthly worksheet
 
@@ -199,6 +199,14 @@ If services disappear with the screen off:
 - test private `/upload/` after 15 minutes and again after an hour.
 
 If the phone rebooted but the stack did not return, inspect whether Android marked Termux:Boot as stopped. Launching its activity once clears that stopped state; then verify the boot scripts and all standard health checks.
+
+### Home-screen stack reset
+
+The phone has an idempotent foreground reset action at `~/.shortcuts/Reset Household Finance`. It stops and restarts Tailscale, Redis, and Daphne, waits for each service, and reports success only after Tailscale status, Redis `PONG`, and the local upload endpoint are healthy. Its small audit log is `logs/manual-reset.log` in the production deployment root.
+
+Termux:Widget is installed from the same F-Droid signing source as Termux. To expose the action, add its widget to the Android home screen and choose **Reset Household Finance**.
+
+The Tailscale boot launcher also detects a non-listening socket left by an unclean Android shutdown and removes that exact socket through root before starting the daemon.
 
 ### Root watchdog state
 
